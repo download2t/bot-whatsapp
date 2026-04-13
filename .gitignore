@@ -1,0 +1,9 @@
+# API build outputs
+ApiBotWhatsapp.Api/bin/
+ApiBotWhatsapp.Api/obj/
+ApiBotWhatsapp.Api/app.db
+ApiBotWhatsapp.Api/app.db-*
+
+# Local environment files
+ApiBotWhatsapp.Api/.env
+whatsapp-bridge/.env

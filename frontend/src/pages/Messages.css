@@ -1,0 +1,199 @@
+.filter-buttons {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+}
+
+.message-filters {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) 180px 180px 180px 180px;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.filter-input {
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 0.7rem 0.85rem;
+  font-size: 0.95rem;
+  background: white;
+}
+
+.pagination-summary {
+  margin: 0 0 0.75rem;
+  color: #475569;
+  font-size: 0.92rem;
+}
+
+.message-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 1rem;
+}
+
+.filter-buttons .btn {
+  padding: 0.6rem 1.2rem;
+  font-size: 0.9rem;
+}
+
+.messages-table {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.messages-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.messages-table thead {
+  background-color: #f5f5f5;
+  border-bottom: 2px solid #ddd;
+}
+
+.messages-table th {
+  padding: 1rem;
+  text-align: left;
+  font-weight: 600;
+  color: #333;
+  font-size: 0.95rem;
+}
+
+.messages-table td {
+  padding: 1rem;
+  border-bottom: 1px solid #e0e0e0;
+  font-size: 0.9rem;
+}
+
+.messages-table tbody tr {
+  transition: background-color 0.2s ease;
+}
+
+.messages-table tbody tr:hover {
+  background-color: #f9f9f9;
+}
+
+.messages-table tbody tr.row-incoming {
+  border-left: 4px solid #4caf50;
+}
+
+.messages-table tbody tr.row-outgoing {
+  border-left: 4px solid #2196f3;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.badge.incoming {
+  background-color: #c8e6c9;
+  color: #2e7d32;
+}
+
+.badge.outgoing {
+  background-color: #bbdefb;
+  color: #1565c0;
+}
+
+.messages-table td.phone {
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+  color: #667eea;
+}
+
+.messages-table td.message {
+  max-width: 300px;
+  word-break: break-word;
+  color: #555;
+}
+
+.status {
+  display: inline-block;
+  padding: 0.3rem 0.7rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.status.received {
+  background-color: #c8e6c9;
+  color: #2e7d32;
+}
+
+.status.sent {
+  background-color: #bbdefb;
+  color: #1565c0;
+}
+
+.status.failed {
+  background-color: #ffcdd2;
+  color: #c62828;
+}
+
+.messages-table td.date {
+  color: #999;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.pagination-info {
+  color: #475569;
+  font-weight: 600;
+}
+
+@media (max-width: 1024px) {
+  .messages-table td.message {
+    max-width: 150px;
+  }
+}
+
+@media (max-width: 768px) {
+  .messages-table table {
+    font-size: 0.8rem;
+  }
+
+  .messages-table th,
+  .messages-table td {
+    padding: 0.75rem 0.5rem;
+  }
+
+  .messages-table td.message {
+    max-width: 80px;
+    font-size: 0.75rem;
+  }
+
+  .messages-table td.phone {
+    font-size: 0.85rem;
+  }
+
+  .message-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .message-actions {
+    justify-content: stretch;
+  }
+
+  .message-actions .btn {
+    width: 100%;
+  }
+
+  .pagination-controls {
+    flex-direction: column;
+  }
+}

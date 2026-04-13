@@ -1,0 +1,128 @@
+.wa-connections-page {
+  display: grid;
+  gap: 14px;
+}
+
+.wa-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.wa-header h1 {
+  margin: 0;
+}
+
+.wa-message {
+  color: #334155;
+  margin: 0;
+}
+
+.wa-add-card,
+.wa-list-card {
+  background: #ffffff;
+  border: 1px solid #dbe2ea;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.wa-add-card h2,
+.wa-list-card h2 {
+  margin: 0 0 10px;
+  font-size: 1.15rem;
+}
+
+.wa-mode-switch {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.wa-mode-switch button {
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #f8fafc;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.wa-mode-switch button.active {
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+.wa-add-content {
+  display: grid;
+  gap: 10px;
+  max-width: 420px;
+}
+
+.wa-hint {
+  margin: 0;
+  color: #475569;
+  font-size: 0.92rem;
+}
+
+.wa-add-content input {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.wa-qr {
+  width: 220px;
+  height: 220px;
+  border: 1px solid #dbe2ea;
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px;
+}
+
+.wa-qr-placeholder {
+  width: 220px;
+  height: 220px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 12px;
+  color: #64748b;
+  font-size: 0.86rem;
+  background: #f8fafc;
+}
+
+.pair-code {
+  margin: 0;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.wa-connection-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.wa-connection-list li {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.wa-connection-list p {
+  margin: 2px 0 0;
+  color: #64748b;
+}
+
+.wa-disconnected {
+  font-size: 0.86rem;
+  color: #64748b;
+}
