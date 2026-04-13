@@ -4,6 +4,15 @@ ApiBotWhatsapp.Api/obj/
 ApiBotWhatsapp.Api/app.db
 ApiBotWhatsapp.Api/app.db-*
 
+# Desktop controller build outputs
+DesktopController/bin/
+DesktopController/obj/
+DesktopController/.vs/
+*.csproj.user
+
+# Local controller runtime state
+.dev-runner/
+
 # Local environment files
 ApiBotWhatsapp.Api/.env
 whatsapp-bridge/.env
