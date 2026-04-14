@@ -209,6 +209,7 @@ function ensureSession(id) {
           message: message.body ?? '',
           companyCode: backendCompanyCode,
           whatsAppNumber: session.phoneNumber,
+          messageTimestampUtc: message.timestamp ? new Date(Number(message.timestamp) * 1000).toISOString() : new Date().toISOString(),
         },
         {
           validateStatus: () => true,

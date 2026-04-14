@@ -9,6 +9,7 @@ namespace ApiBotWhatsapp.Api.Services;
 public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender messageSender, IConfiguration configuration)
 {
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> PhoneLocks = new();
+    private static readonly TimeSpan MaxIncomingMessageAge = TimeSpan.FromMinutes(5);
 
     public async Task<WhatsAppWebhookResponse> ProcessIncomingMessageAsync(WhatsAppWebhookRequest request, CancellationToken cancellationToken)
     {
@@ -34,12 +35,16 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
             return new WhatsAppWebhookResponse(false, $"Company not found for code: {companyCode}", null);
         }
 
+        var messageTimestampUtc = request.MessageTimestampUtc?.ToUniversalTime() ?? DateTime.UtcNow;
+        var messageAge = DateTime.UtcNow - messageTimestampUtc;
+        var isStale = messageAge > MaxIncomingMessageAge;
+
         var phoneLock = PhoneLocks.GetOrAdd(normalizedPhone, _ => new SemaphoreSlim(1, 1));
         await phoneLock.WaitAsync(cancellationToken);
 
         try
         {
-            var brasiliaTime = GetCurrentBrasiliaTime(configuration["WhatsApp:TimeZoneId"]);
+            var brasiliaTime = GetBrasiliaTimeFromUtc(messageTimestampUtc, configuration["WhatsApp:TimeZoneId"]);
 
             var incomingLog = new MessageLog
             {
@@ -62,6 +67,11 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
             if (isInWhitelist)
             {
                 return new WhatsAppWebhookResponse(false, "Number is in whitelist. Auto reply skipped.", null);
+            }
+
+            if (isStale)
+            {
+                return new WhatsAppWebhookResponse(false, $"Incoming message is older than {MaxIncomingMessageAge.TotalMinutes:0} minutes. Auto reply skipped.", null);
             }
 
             var currentTime = GetCurrentRuleTime(configuration["WhatsApp:TimeZoneId"]);
@@ -231,6 +241,27 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
         catch (InvalidTimeZoneException)
         {
             return DateTime.Now;
+        }
+    }
+
+    private static DateTime GetBrasiliaTimeFromUtc(DateTime utcTime, string? configuredTimeZoneId)
+    {
+        configuredTimeZoneId = string.IsNullOrWhiteSpace(configuredTimeZoneId)
+            ? "E. South America Standard Time"
+            : configuredTimeZoneId;
+
+        try
+        {
+            var timezone = TimeZoneInfo.FindSystemTimeZoneById(configuredTimeZoneId);
+            return TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcTime, DateTimeKind.Utc), timezone);
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            return DateTime.SpecifyKind(utcTime, DateTimeKind.Utc).ToLocalTime();
+        }
+        catch (InvalidTimeZoneException)
+        {
+            return DateTime.SpecifyKind(utcTime, DateTimeKind.Utc).ToLocalTime();
         }
     }
 
