@@ -1,0 +1,139 @@
+.companies-page {
+  display: grid;
+  gap: 1rem;
+}
+
+.companies-subtitle {
+  margin: 0;
+  color: #64748b;
+}
+
+.companies-message {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 0.75rem;
+}
+
+.companies-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.membership-layout {
+  margin-top: 0.25rem;
+}
+
+.companies-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1rem;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05);
+}
+
+.companies-card h2 {
+  margin-top: 0;
+}
+
+.companies-form {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.companies-form-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.companies-search {
+  width: 100%;
+  margin-top: 0.5rem;
+  padding: 0.7rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+.companies-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.companies-list.compact {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.company-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border: 1px solid #dbe3ee;
+  border-radius: 8px;
+  padding: 0.6rem;
+}
+
+.company-row.selected {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+
+.company-select {
+  border: none;
+  background: transparent;
+  text-align: left;
+  display: grid;
+  gap: 0.2rem;
+  cursor: pointer;
+  width: 100%;
+}
+
+.company-select strong {
+  font-size: 0.95rem;
+}
+
+.company-select span,
+.company-select small {
+  color: #64748b;
+}
+
+.company-actions {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.member-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border: 1px solid #dbe3ee;
+  border-radius: 8px;
+  padding: 0.6rem;
+}
+
+.member-row small {
+  display: block;
+  color: #64748b;
+}
+
+.admin-badge {
+  display: inline-block;
+  width: fit-content;
+  margin-top: 0.15rem;
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+  font-size: 0.72rem;
+}
+
+@media (max-width: 900px) {
+  .companies-layout {
+    grid-template-columns: 1fr;
+  }
+}

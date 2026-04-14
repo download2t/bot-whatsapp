@@ -22,4 +22,6 @@ public record WhatsAppConnectionItemResponse(
     string? PhoneNumber,
     string? LastError);
 
+public record WhatsAppCreateConnectionResponse(string Id, string Status);
+
 public record SendMessageRequest(string PhoneNumber, string Message, bool MarkAsUnread = false);

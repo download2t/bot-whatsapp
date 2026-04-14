@@ -9,6 +9,26 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
 
     private string? BaseUrl => configuration["WhatsApp:BridgeBaseUrl"];
 
+    public async Task<IReadOnlyList<WhatsAppConnectionItemResponse>> GetConnectionsAsync(CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(BaseUrl))
+        {
+            return [];
+        }
+
+        try
+        {
+            var result = await _client.GetFromJsonAsync<List<WhatsAppConnectionItemResponse>>(
+                $"{BaseUrl}/session/list",
+                cancellationToken);
+            return result ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
     public async Task<WhatsAppConnectionStatusResponse?> GetStatusAsync(CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(BaseUrl))
@@ -18,6 +38,21 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
 
         try
         {
+            var connections = await GetConnectionsAsync(cancellationToken);
+            if (connections.Count > 0)
+            {
+                var selected = connections.FirstOrDefault(item => item.IsConnected)
+                    ?? connections[0];
+
+                return new WhatsAppConnectionStatusResponse(
+                    selected.Status,
+                    selected.IsConnected,
+                    selected.HasQr,
+                    true,
+                    selected.PhoneNumber,
+                    selected.LastError);
+            }
+
             return await _client.GetFromJsonAsync<WhatsAppConnectionStatusResponse>(
                 $"{BaseUrl}/session/status",
                 cancellationToken);
@@ -28,7 +63,7 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
         }
     }
 
-    public async Task<string?> GetQrAsync(CancellationToken cancellationToken)
+    public async Task<string?> GetQrAsync(string? sessionId, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(BaseUrl))
         {
@@ -38,7 +73,10 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
         HttpResponseMessage response;
         try
         {
-            response = await _client.GetAsync($"{BaseUrl}/session/qr", cancellationToken);
+            var sessionPath = string.IsNullOrWhiteSpace(sessionId)
+                ? "default"
+                : Uri.EscapeDataString(sessionId);
+            response = await _client.GetAsync($"{BaseUrl}/session/{sessionPath}/qr", cancellationToken);
         }
         catch
         {
@@ -54,43 +92,7 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
         return payload?.QrDataUrl;
     }
 
-    public async Task<bool> ConnectAsync(CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(BaseUrl))
-        {
-            return false;
-        }
-
-        try
-        {
-            var response = await _client.PostAsync($"{BaseUrl}/session/connect", null, cancellationToken);
-            return response.IsSuccessStatusCode;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    public async Task<bool> DisconnectAsync(CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(BaseUrl))
-        {
-            return false;
-        }
-
-        try
-        {
-            var response = await _client.PostAsync($"{BaseUrl}/session/disconnect", null, cancellationToken);
-            return response.IsSuccessStatusCode;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    public async Task<string?> GetPairingCodeAsync(string phoneNumber, CancellationToken cancellationToken)
+    public async Task<string?> CreateConnectionAsync(CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(BaseUrl))
         {
@@ -99,8 +101,77 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
 
         try
         {
+            var response = await _client.PostAsync($"{BaseUrl}/session/create", null, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            var payload = await response.Content.ReadFromJsonAsync<WhatsAppCreateConnectionResponse>(cancellationToken: cancellationToken);
+            return payload?.Id;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public async Task<bool> ConnectAsync(string? sessionId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(BaseUrl))
+        {
+            return false;
+        }
+
+        try
+        {
+            var sessionPath = string.IsNullOrWhiteSpace(sessionId)
+                ? "default"
+                : Uri.EscapeDataString(sessionId);
+            var response = await _client.PostAsync($"{BaseUrl}/session/{sessionPath}/connect", null, cancellationToken);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<bool> DisconnectAsync(string? sessionId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(BaseUrl))
+        {
+            return false;
+        }
+
+        try
+        {
+            var sessionPath = string.IsNullOrWhiteSpace(sessionId)
+                ? "default"
+                : Uri.EscapeDataString(sessionId);
+            var response = await _client.PostAsync($"{BaseUrl}/session/{sessionPath}/disconnect", null, cancellationToken);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async Task<string?> GetPairingCodeAsync(string phoneNumber, string? sessionId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(BaseUrl))
+        {
+            return null;
+        }
+
+        try
+        {
+            var sessionPath = string.IsNullOrWhiteSpace(sessionId)
+                ? "default"
+                : Uri.EscapeDataString(sessionId);
             var response = await _client.PostAsJsonAsync(
-                $"{BaseUrl}/session/pairing-code",
+                $"{BaseUrl}/session/{sessionPath}/pairing-code",
                 new { phoneNumber },
                 cancellationToken);
 
@@ -118,7 +189,7 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
         }
     }
 
-    public async Task<(bool Success, string Status)> SendMessageAsync(string phoneNumber, string message, bool markAsUnread, CancellationToken cancellationToken)
+    public async Task<(bool Success, string Status)> SendMessageAsync(string phoneNumber, string message, bool markAsUnread, string? sourceWhatsAppNumber, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(BaseUrl))
         {
@@ -130,7 +201,13 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
         {
             response = await _client.PostAsJsonAsync(
                 $"{BaseUrl}/messages/send",
-                new SendMessageRequest(phoneNumber, message, markAsUnread),
+                new
+                {
+                    phoneNumber,
+                    message,
+                    markAsUnread,
+                    sourceWhatsAppNumber
+                },
                 cancellationToken);
         }
         catch (Exception ex)

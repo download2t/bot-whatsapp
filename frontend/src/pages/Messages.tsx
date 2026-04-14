@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { apiFetch, getApiBase } from '../lib/api'
-import type { MessageLog, PagedMessageLog } from '../types'
+import type { MessageLog, PagedMessageLog, WhatsAppFilterOptions } from '../types'
 import './Messages.css'
 
 export function Messages() {
@@ -8,6 +8,8 @@ export function Messages() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState<'all' | 'incoming' | 'outgoing'>('all')
+  const [whatsAppOptions, setWhatsAppOptions] = useState<string[]>([])
+  const [selectedWhatsAppNumber, setSelectedWhatsAppNumber] = useState('')
   
   // Inputs temporários (do form)
   const [phoneNumber, setPhoneNumber] = useState('')
@@ -25,6 +27,20 @@ export function Messages() {
   const [totalCount, setTotalCount] = useState(0)
 
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
+
+  useEffect(() => {
+    const loadWhatsAppOptions = async () => {
+      try {
+        const options = await apiFetch<WhatsAppFilterOptions>('/api/messages/whatsapp-options')
+        const numbers = options.numbers || []
+        setWhatsAppOptions(numbers)
+      } catch {
+        // optional metadata endpoint
+      }
+    }
+
+    void loadWhatsAppOptions()
+  }, [])
 
   useEffect(() => {
     if (page > totalPages) {
@@ -65,6 +81,10 @@ export function Messages() {
           params.set('phoneNumber', appliedPhoneNumber.trim())
         }
 
+        if (selectedWhatsAppNumber.trim()) {
+          params.set('whatsAppNumber', selectedWhatsAppNumber.trim())
+        }
+
         if (appliedStartDate) {
           params.set('startDate', appliedStartDate)
         }
@@ -89,7 +109,7 @@ export function Messages() {
     }
 
     loadMessages()
-  }, [filter, appliedPhoneNumber, appliedStartDate, appliedEndDate, sortBy, sortOrder, page, pageSize])
+  }, [filter, appliedPhoneNumber, appliedStartDate, appliedEndDate, selectedWhatsAppNumber, sortBy, sortOrder, page, pageSize])
 
   const downloadCsv = async () => {
     try {
@@ -105,6 +125,10 @@ export function Messages() {
 
       if (appliedPhoneNumber.trim()) {
         params.set('phoneNumber', appliedPhoneNumber.trim())
+      }
+
+      if (selectedWhatsAppNumber.trim()) {
+        params.set('whatsAppNumber', selectedWhatsAppNumber.trim())
       }
 
       if (appliedStartDate) {
@@ -148,6 +172,7 @@ export function Messages() {
     setAppliedPhoneNumber('')
     setAppliedStartDate('')
     setAppliedEndDate('')
+    setSelectedWhatsAppNumber('')
     setSortBy('timestamp')
     setSortOrder('desc')
     setPage(1)
@@ -207,6 +232,16 @@ export function Messages() {
         <button className="btn btn-primary" onClick={handleFilter}>
           🔍 Filtrar
         </button>
+        <select
+          value={selectedWhatsAppNumber}
+          onChange={(event) => setSelectedWhatsAppNumber(event.target.value)}
+          className="filter-input"
+        >
+          <option value="">Todos os numeros WhatsApp</option>
+          {whatsAppOptions.map((number) => (
+            <option key={number} value={number}>{number}</option>
+          ))}
+        </select>
         <button className="btn btn-secondary" onClick={clearFields}>
           ✕ Limpar campos
         </button>
@@ -233,6 +268,7 @@ export function Messages() {
               <tr>
                 <th>Tipo</th>
                 <th>Número</th>
+                <th>WhatsApp</th>
                 <th>Mensagem</th>
                 <th>Status</th>
                 <th>Data/Hora</th>
@@ -247,6 +283,7 @@ export function Messages() {
                     </span>
                   </td>
                   <td className="phone"><strong>{msg.phoneNumber}</strong></td>
+                  <td className="phone">{msg.whatsAppNumber || '-'}</td>
                   <td className="message">{msg.content}</td>
                   <td>
                     <span className={`status ${msg.status.toLowerCase()}`}>

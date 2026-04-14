@@ -11,24 +11,13 @@ public class WhatsAppController(WhatsAppBridgeClient bridgeClient) : ControllerB
     [HttpGet("connections")]
     public async Task<ActionResult<IEnumerable<WhatsAppConnectionItemResponse>>> GetConnections(CancellationToken cancellationToken)
     {
-        var status = await bridgeClient.GetStatusAsync(cancellationToken);
-        if (status is null)
+        var connections = await bridgeClient.GetConnectionsAsync(cancellationToken);
+        if (connections.Count == 0)
         {
             return NotFound("WhatsApp bridge is not configured.");
         }
 
-        var list = new[]
-        {
-            new WhatsAppConnectionItemResponse(
-                "default",
-                status.Status,
-                status.IsConnected,
-                status.HasQr,
-                status.PhoneNumber,
-                status.LastError)
-        };
-
-        return Ok(list);
+        return Ok(connections);
     }
 
     [HttpGet("status")]
@@ -39,29 +28,48 @@ public class WhatsAppController(WhatsAppBridgeClient bridgeClient) : ControllerB
     }
 
     [HttpGet("qr")]
-    public async Task<ActionResult<WhatsAppQrResponse>> GetQr(CancellationToken cancellationToken)
+    public async Task<ActionResult<WhatsAppQrResponse>> GetQr([FromQuery] string? sessionId, CancellationToken cancellationToken)
     {
-        var qr = await bridgeClient.GetQrAsync(cancellationToken);
+        var qr = await bridgeClient.GetQrAsync(sessionId, cancellationToken);
         return qr is null ? NotFound("QR not available.") : Ok(new WhatsAppQrResponse(qr));
     }
 
-    [HttpPost("connect")]
-    public async Task<ActionResult> Connect(CancellationToken cancellationToken)
+    [HttpPost("connections")]
+    public async Task<ActionResult<WhatsAppCreateConnectionResponse>> CreateConnection(CancellationToken cancellationToken)
     {
-        var ok = await bridgeClient.ConnectAsync(cancellationToken);
+        var id = await bridgeClient.CreateConnectionAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return BadRequest("Unable to create WhatsApp connection.");
+        }
+
+        var connected = await bridgeClient.ConnectAsync(id, cancellationToken);
+        if (!connected)
+        {
+            return BadRequest("Unable to start WhatsApp connection.");
+        }
+
+        return Ok(new WhatsAppCreateConnectionResponse(id, "connecting"));
+    }
+
+    [HttpPost("connect")]
+    public async Task<ActionResult> Connect([FromQuery] string? sessionId, CancellationToken cancellationToken)
+    {
+        var ok = await bridgeClient.ConnectAsync(sessionId, cancellationToken);
         return ok ? Accepted() : BadRequest("Unable to start WhatsApp bridge.");
     }
 
     [HttpPost("disconnect")]
-    public async Task<ActionResult> Disconnect(CancellationToken cancellationToken)
+    public async Task<ActionResult> Disconnect([FromQuery] string? sessionId, CancellationToken cancellationToken)
     {
-        var ok = await bridgeClient.DisconnectAsync(cancellationToken);
+        var ok = await bridgeClient.DisconnectAsync(sessionId, cancellationToken);
         return ok ? Accepted() : BadRequest("Unable to disconnect WhatsApp bridge.");
     }
 
     [HttpPost("pairing-code")]
     public async Task<ActionResult<WhatsAppPairingCodeResponse>> PairingCode(
         [FromBody] WhatsAppPairingCodeRequest request,
+        [FromQuery] string? sessionId,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.PhoneNumber))
@@ -75,7 +83,7 @@ public class WhatsAppController(WhatsAppBridgeClient bridgeClient) : ControllerB
             return BadRequest("PhoneNumber is invalid.");
         }
 
-        var code = await bridgeClient.GetPairingCodeAsync(digits, cancellationToken);
+        var code = await bridgeClient.GetPairingCodeAsync(digits, sessionId, cancellationToken);
         return string.IsNullOrWhiteSpace(code)
             ? BadRequest("Unable to generate pairing code.")
             : Ok(new WhatsAppPairingCodeResponse(code));

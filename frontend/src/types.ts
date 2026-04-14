@@ -2,11 +2,27 @@ export type LoginResponse = {
   token: string
   expiresAtUtc: string
   username: string
+  isAdmin: boolean
+  userTitle: string | null
+  companyId: number | null
+  companyName: string | null
+  companyCode: string | null
+  requiresCompanySelection: boolean
+  companies: CompanyOption[]
+}
+
+export type CompanyOption = {
+  companyId: number
+  companyName: string
+  companyCode: string
+  isCurrent: boolean
 }
 
 export type ScheduleRule = {
   id: number
   name: string
+  whatsAppNumbers: string[]
+  whatsAppNumber: string
   startTime: string
   endTime: string
   message: string
@@ -26,6 +42,8 @@ export type WhitelistItem = {
 
 export type MessageLog = {
   id: number
+  companyId: number
+  whatsAppNumber: string
   direction: string
   phoneNumber: string
   content: string
@@ -57,6 +75,7 @@ export type WhatsAppQrResponse = {
 export type UserProfile = {
   id: number
   username: string
+  isAdmin?: boolean
   email?: string | null
   phone?: string | null
   cpf?: string | null
@@ -69,10 +88,36 @@ export type UserProfile = {
 export type UserListItem = {
   id: number
   username: string
+  isAdmin?: boolean
   email?: string | null
   phone?: string | null
   fullName?: string | null
   createdAtUtc: string
+}
+
+export type CompanyListItem = {
+  id: number
+  name: string
+  companyCode: string
+  createdAtUtc: string
+  usersCount: number
+}
+
+export type CompanyUserItem = {
+  userId: number
+  username: string
+  isAdmin: boolean
+  email?: string | null
+  fullName?: string | null
+}
+
+export type CompanyUserOption = {
+  userId: number
+  username: string
+  isAdmin: boolean
+  email?: string | null
+  fullName?: string | null
+  isLinked: boolean
 }
 
 export type WhatsAppConnectionItem = {
@@ -86,4 +131,9 @@ export type WhatsAppConnectionItem = {
 
 export type WhatsAppPairingCodeResponse = {
   pairingCode: string | null
+}
+
+export type WhatsAppFilterOptions = {
+  numbers: string[]
+  fixedNumber: string | null
 }

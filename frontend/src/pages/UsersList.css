@@ -51,6 +51,58 @@
   margin: 2rem 0 1rem;
 }
 
+.company-filter {
+  min-width: 260px;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.company-filter-wrapper {
+  position: relative;
+  min-width: 320px;
+}
+
+.company-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
+  max-height: 320px;
+  overflow-y: auto;
+  z-index: 20;
+}
+
+.company-dropdown-item {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 0.55rem 0.7rem;
+  display: grid;
+  gap: 0.1rem;
+  cursor: pointer;
+}
+
+.company-dropdown-item small {
+  color: #64748b;
+}
+
+.company-dropdown-item:hover,
+.company-dropdown-item.active {
+  background: #eff6ff;
+}
+
+.company-dropdown-empty {
+  padding: 0.7rem;
+  color: #64748b;
+}
+
 .empty-state {
   text-align: center;
   padding: 3rem 1rem;

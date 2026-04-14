@@ -144,10 +144,49 @@
   line-height: 1.1;
 }
 
-.wa-status {
+.menu-company {
+  margin: 2px 0 2px;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.menu-company-code {
+  margin: 0 0 8px;
+  color: #64748b;
+  font-size: 0.82rem;
+}
+
+.company-switcher {
+  margin-top: 6px;
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  padding: 9px 10px;
+  font-size: 0.92rem;
+}
+
+.company-feedback {
+  margin-top: 6px;
+  color: #b91c1c;
+}
+
+.wa-status-list {
   display: grid;
-  gap: 4px;
+  gap: 6px;
   margin: 8px 0 10px;
+}
+
+.wa-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #ffffff;
 }
 
 .status-badge {
@@ -173,9 +212,10 @@
   background: #fef2f2;
 }
 
-.wa-phone {
-  font-size: 0.8rem;
-  color: #334155;
+.wa-phone-inline {
+  font-size: 0.84rem;
+  color: #0f172a;
+  font-weight: 700;
 }
 
 .menu-actions {

@@ -2,6 +2,8 @@ namespace ApiBotWhatsapp.Api.Dtos;
 
 public record MessageLogResponse(
     int Id,
+    int CompanyId,
+    string WhatsAppNumber,
     string Direction,
     string PhoneNumber,
     string Content,
@@ -22,3 +24,5 @@ public record DashboardStatusResponse(
     int TodayIncoming,
     int TodayOutgoing,
     int TodayAutomatic);
+
+public record WhatsAppFilterOptionsResponse(IReadOnlyList<string> Numbers, string? FixedNumber);

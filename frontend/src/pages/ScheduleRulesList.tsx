@@ -1,18 +1,34 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
-import type { ScheduleRule } from '../types'
+import type { ScheduleRule, WhatsAppFilterOptions } from '../types'
 import './ScheduleRules.css'
 
 export function ScheduleRulesList() {
   const [rules, setRules] = useState<ScheduleRule[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [whatsAppOptions, setWhatsAppOptions] = useState<string[]>([])
+  const [selectedWhatsAppNumber, setSelectedWhatsAppNumber] = useState('')
+
+  useEffect(() => {
+    const loadOptions = async () => {
+      try {
+        const options = await apiFetch<WhatsAppFilterOptions>('/api/schedule-rules/whatsapp-options')
+        setWhatsAppOptions(options.numbers || [])
+      } catch {
+        // optional metadata endpoint
+      }
+    }
+
+    void loadOptions()
+  }, [])
 
   const loadRules = async () => {
     try {
       setLoading(true)
-      const data = await apiFetch<ScheduleRule[]>('/api/schedule-rules')
+      const query = selectedWhatsAppNumber ? `?whatsAppNumber=${encodeURIComponent(selectedWhatsAppNumber)}` : ''
+      const data = await apiFetch<ScheduleRule[]>(`/api/schedule-rules${query}`)
       setRules(data || [])
       setError(null)
     } catch (err) {
@@ -24,8 +40,8 @@ export function ScheduleRulesList() {
   }
 
   useEffect(() => {
-    loadRules()
-  }, [])
+    void loadRules()
+  }, [selectedWhatsAppNumber])
 
   const handleDelete = async (id: number) => {
     if (!confirm('Tem certeza que deseja eliminar esta regra?')) return
@@ -48,11 +64,13 @@ export function ScheduleRulesList() {
         method: 'PUT',
         body: JSON.stringify({
           name: updated.name,
+          whatsAppNumbers: updated.whatsAppNumbers,
           startTime: updated.startTime,
           endTime: updated.endTime,
           message: updated.message,
           isEnabled: updated.isEnabled,
           throttleMinutes: updated.throttleMinutes,
+          whatsAppNumber: updated.whatsAppNumber,
           isOutOfBusinessHours: updated.isOutOfBusinessHours,
           maxDailyMessagesPerUser: updated.maxDailyMessagesPerUser
         })
@@ -71,6 +89,16 @@ export function ScheduleRulesList() {
     <div className="container">
       <div className="rules-header">
         <h1>Regras de Agendamento</h1>
+        <select
+          className="filter-input"
+          value={selectedWhatsAppNumber}
+          onChange={(event) => setSelectedWhatsAppNumber(event.target.value)}
+        >
+          <option value="">Todos os numeros WhatsApp</option>
+          {whatsAppOptions.map((number) => (
+            <option key={number} value={number}>{number}</option>
+          ))}
+        </select>
         <Link to="/rules/new" className="btn btn-primary">
           ➕ Nova Regra
         </Link>
@@ -93,6 +121,7 @@ export function ScheduleRulesList() {
                   <div className="rule-time">
                     {rule.isOutOfBusinessHours ? '🕐 Fora de:' : '⏰ De:'} {rule.startTime} até {rule.endTime}
                   </div>
+                  <div className="rule-time">📱 WhatsApp: {(rule.whatsAppNumbers && rule.whatsAppNumbers.length > 0) ? rule.whatsAppNumbers.join(', ') : (rule.whatsAppNumber || '-')}</div>
                 </div>
                 <div className="rule-status">
                   <label className="toggle">

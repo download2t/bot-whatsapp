@@ -6,6 +6,12 @@ public class ScheduleRule
 {
     public int Id { get; set; }
 
+    public int CompanyId { get; set; }
+
+    [Required]
+    [MaxLength(20)]
+    public string WhatsAppNumber { get; set; } = string.Empty;
+
     [MaxLength(100)]
     public string Name { get; set; } = string.Empty;
 

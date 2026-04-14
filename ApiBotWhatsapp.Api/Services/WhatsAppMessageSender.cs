@@ -5,12 +5,12 @@ namespace ApiBotWhatsapp.Api.Services;
 public class WhatsAppMessageSender(IConfiguration configuration, IHttpClientFactory httpClientFactory, WhatsAppBridgeClient bridgeClient)
 {
 
-    public async Task<(bool Success, string Status)> SendMessageAsync(string phoneNumber, string message, bool markAsUnread, CancellationToken cancellationToken)
+    public async Task<(bool Success, string Status)> SendMessageAsync(string phoneNumber, string message, bool markAsUnread, string? sourceWhatsAppNumber, CancellationToken cancellationToken)
     {
         var bridgeBaseUrl = configuration["WhatsApp:BridgeBaseUrl"];
         if (!string.IsNullOrWhiteSpace(bridgeBaseUrl))
         {
-            return await bridgeClient.SendMessageAsync(phoneNumber, message, markAsUnread, cancellationToken);
+            return await bridgeClient.SendMessageAsync(phoneNumber, message, markAsUnread, sourceWhatsAppNumber, cancellationToken);
         }
 
         var outgoingWebhookUrl = configuration["WhatsApp:OutgoingWebhookUrl"];
@@ -23,7 +23,8 @@ public class WhatsAppMessageSender(IConfiguration configuration, IHttpClientFact
         {
             phoneNumber,
             message,
-            markAsUnread
+            markAsUnread,
+            sourceWhatsAppNumber
         };
 
         try

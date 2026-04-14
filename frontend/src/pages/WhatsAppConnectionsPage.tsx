@@ -14,6 +14,33 @@ export function WhatsAppConnectionsPage() {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [message, setMessage] = useState('')
   const [isQrStarting, setIsQrStarting] = useState(false)
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const connectedConnections = connections.filter((item) => item.isConnected)
+
+  const formatPhone = (value: string | null | undefined) => {
+    const digits = String(value ?? '').replace(/\D/g, '')
+    if (!digits) {
+      return 'Sem numero vinculado'
+    }
+
+    if (digits.length < 8) {
+      return `+${digits}`
+    }
+
+    const country = digits.startsWith('55') ? '+55' : `+${digits.slice(0, 2)}`
+    const national = digits.startsWith('55') ? digits.slice(2) : digits.slice(2)
+    const ddd = national.slice(0, 2)
+    const local = national.slice(2)
+
+    if (!ddd || !local) {
+      return `+${digits}`
+    }
+
+    const prefix = local.length > 4 ? local.slice(0, local.length - 4) : local
+    const suffix = local.length > 4 ? local.slice(-4) : ''
+
+    return `${country} (${ddd}) ${prefix}${suffix ? ` - ${suffix}` : ''}`.replace(/\s+/g, ' ').trim()
+  }
 
   const loadConnections = async () => {
     try {
@@ -39,15 +66,22 @@ export function WhatsAppConnectionsPage() {
   useEffect(() => {
     let cancelled = false
     let intervalId: number | null = null
+    let currentSessionId: string | null = null
 
     const startAndPollQr = async () => {
       if (!showAdd || mode !== 'qr') {
+        setActiveSessionId(null)
         return
       }
 
       setIsQrStarting(true)
       try {
-        await apiFetch<null>('/api/whatsapp/connect', { method: 'POST' })
+        const created = await apiFetch<{ id: string; status: string }>('/api/whatsapp/connections', { method: 'POST' })
+        if (!created?.id) {
+          throw new Error('Nao foi possivel criar sessao de conexao.')
+        }
+        currentSessionId = created.id
+        setActiveSessionId(created.id)
       } catch (error) {
         if (!cancelled) {
           setMessage(error instanceof Error ? error.message : 'Falha ao iniciar conexao por QR')
@@ -63,8 +97,12 @@ export function WhatsAppConnectionsPage() {
       }
 
       const poll = async () => {
+        if (!currentSessionId) {
+          return
+        }
+
         try {
-          const qr = await apiFetch<WhatsAppQrResponse>('/api/whatsapp/qr')
+          const qr = await apiFetch<WhatsAppQrResponse>(`/api/whatsapp/qr?sessionId=${encodeURIComponent(currentSessionId)}`)
           if (!cancelled) {
             setQrDataUrl(qr.qrDataUrl)
             if (qr.qrDataUrl) {
@@ -97,8 +135,14 @@ export function WhatsAppConnectionsPage() {
   const handleConnectByNumber = async () => {
     setBusy(true)
     try {
-      await apiFetch<null>('/api/whatsapp/connect', { method: 'POST' })
-      const payload = await apiFetch<WhatsAppPairingCodeResponse>('/api/whatsapp/pairing-code', {
+      const created = await apiFetch<{ id: string; status: string }>('/api/whatsapp/connections', { method: 'POST' })
+      const sessionId = created?.id
+      if (!sessionId) {
+        throw new Error('Nao foi possivel criar sessao para codigo de vinculacao.')
+      }
+
+      setActiveSessionId(sessionId)
+      const payload = await apiFetch<WhatsAppPairingCodeResponse>(`/api/whatsapp/pairing-code?sessionId=${encodeURIComponent(sessionId)}`, {
         method: 'POST',
         body: JSON.stringify({ phoneNumber: pairingPhone }),
       })
@@ -113,7 +157,7 @@ export function WhatsAppConnectionsPage() {
     }
   }
 
-  const handleDisconnect = async () => {
+  const handleDisconnect = async (sessionId: string) => {
     const confirmStep1 = window.confirm('Tem certeza que deseja desconectar este WhatsApp?')
     if (!confirmStep1) {
       return
@@ -126,9 +170,12 @@ export function WhatsAppConnectionsPage() {
 
     setBusy(true)
     try {
-      await apiFetch<null>('/api/whatsapp/disconnect', { method: 'POST' })
+      await apiFetch<null>(`/api/whatsapp/disconnect?sessionId=${encodeURIComponent(sessionId)}`, { method: 'POST' })
       setPairingCode(null)
       setQrDataUrl(null)
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(null)
+      }
       setMessage('Conexao encerrada com sucesso.')
       await loadConnections()
     } catch (error) {
@@ -191,19 +238,16 @@ export function WhatsAppConnectionsPage() {
           <p>Carregando...</p>
         ) : (
           <ul className="wa-connection-list">
-            {connections.map((item) => (
+            {connectedConnections.map((item) => (
               <li key={item.id}>
-                <div>
-                  <strong>{item.phoneNumber || 'Sem numero vinculado'}</strong>
-                  <p>Status: {item.status}</p>
+                <div className="wa-connection-main">
+                  <strong>{formatPhone(item.phoneNumber)}</strong>
+                  <span className="wa-inline-status">Conectado</span>
                 </div>
-                {item.isConnected ? (
-                  <button className="btn btn-danger" onClick={() => void handleDisconnect()} disabled={busy}>Desconectar</button>
-                ) : (
-                  <span className="wa-disconnected">Desconectado</span>
-                )}
+                <button className="btn btn-danger" onClick={() => void handleDisconnect(item.id)} disabled={busy}>Desconectar</button>
               </li>
             ))}
+            {connectedConnections.length === 0 && <li>Nenhuma conexão ativa no momento.</li>}
           </ul>
         )}
       </section>

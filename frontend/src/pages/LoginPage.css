@@ -36,14 +36,16 @@
   color: #334155;
 }
 
-.login-form input {
+.login-form input,
+.login-form select {
   border: 1px solid #cbd5e1;
   border-radius: 10px;
   padding: 10px 12px;
   font-size: 0.95rem;
 }
 
-.login-form input:focus {
+.login-form input:focus,
+.login-form select:focus {
   outline: none;
   border-color: #0f172a;
   box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.08);

@@ -14,8 +14,7 @@ export function ProfilePage() {
     phone: '',
     cpf: '',
     fullName: '',
-    title: '',
-    notes: ''
+    title: 'Operador'
   })
 
   useEffect(() => {
@@ -28,8 +27,7 @@ export function ProfilePage() {
           phone: me.phone || '',
           cpf: me.cpf || '',
           fullName: me.fullName || '',
-          title: me.title || '',
-          notes: me.notes || ''
+          title: me.title === 'Gestor' ? 'Gestor' : 'Operador'
         })
       } catch (error) {
         setMessage(error instanceof Error ? error.message : 'Falha ao carregar perfil')
@@ -54,9 +52,7 @@ export function ProfilePage() {
           email: form.email.trim() || null,
           phone: form.phone.trim() || null,
           cpf: form.cpf.trim() || null,
-          fullName: form.fullName.trim() || null,
-          title: form.title.trim() || null,
-          notes: form.notes.trim() || null
+          fullName: form.fullName.trim() || null
         })
       })
       setForm({
@@ -65,8 +61,7 @@ export function ProfilePage() {
         phone: updated.phone || '',
         cpf: updated.cpf || '',
         fullName: updated.fullName || '',
-        title: updated.title || '',
-        notes: updated.notes || ''
+        title: updated.title === 'Gestor' ? 'Gestor' : 'Operador'
       })
       localStorage.setItem('bot_user', updated.username)
       setMessage('Perfil atualizado com sucesso.')
@@ -142,18 +137,8 @@ export function ProfilePage() {
           <input
             type="text"
             value={form.title}
-            onChange={(e) => setForm({ ...form, title: e.target.value })}
-            placeholder="Ex: Gerente, Operador"
-          />
-        </div>
-
-        <div className="form-group">
-          <label>Observações</label>
-          <textarea
-            value={form.notes}
-            onChange={(e) => setForm({ ...form, notes: e.target.value })}
-            placeholder="Notas adicionais sobre você"
-            rows={4}
+            disabled
+            readOnly
           />
         </div>
 

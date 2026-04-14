@@ -1,15 +1,10 @@
 import { useState } from 'react'
 import { getApiBase } from '../lib/api'
+import type { LoginResponse } from '../types'
 import './LoginPage.css'
 
-type LoginResponse = {
-  token: string
-  expiresAtUtc: string
-  username: string
-}
-
 type LoginPageProps = {
-  onLoginSuccess: (token: string, username: string) => void
+  onLoginSuccess: (response: LoginResponse) => void
 }
 
 const API_BASE = getApiBase()
@@ -38,7 +33,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
       }
 
       const data: LoginResponse = await response.json()
-      onLoginSuccess(data.token, data.username)
+      onLoginSuccess(data)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao fazer login')
     } finally {
@@ -70,7 +65,6 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
             onChange={(event) => setPassword(event.target.value)}
             required
           />
-
           {error && <p className="login-error">{error}</p>}
 
           <button type="submit" disabled={submitting}>

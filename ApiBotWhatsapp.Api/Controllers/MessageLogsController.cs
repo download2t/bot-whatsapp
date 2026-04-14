@@ -1,5 +1,6 @@
 using ApiBotWhatsapp.Api.Data;
 using ApiBotWhatsapp.Api.Dtos;
+using ApiBotWhatsapp.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Text;
@@ -8,18 +9,33 @@ namespace ApiBotWhatsapp.Api.Controllers;
 
 [ApiController]
 [Route("api/messages")]
-public class MessageLogsController(AppDbContext dbContext) : ControllerBase
+public class MessageLogsController(AppDbContext dbContext, WhatsAppBridgeClient bridgeClient) : ControllerBase
 {
+    private int? GetCurrentCompanyId()
+    {
+        var claim = User.FindFirst("company_id")?.Value;
+        return int.TryParse(claim, out var companyId) ? companyId : null;
+    }
+
     [HttpGet]
     public async Task<ActionResult<IEnumerable<MessageLogResponse>>> GetRecent([FromQuery] int take = 100, CancellationToken cancellationToken = default)
     {
+        var companyId = GetCurrentCompanyId();
+        if (companyId is null)
+        {
+            return Unauthorized("Company not found in token.");
+        }
+
         take = Math.Clamp(take, 1, 500);
 
         var logs = await dbContext.MessageLogs
+            .Where(item => item.CompanyId == companyId.Value)
             .OrderByDescending(item => item.TimestampUtc)
             .Take(take)
             .Select(item => new MessageLogResponse(
                 item.Id,
+                item.CompanyId,
+                item.WhatsAppNumber,
                 item.Direction,
                 item.PhoneNumber,
                 item.Content,
@@ -34,6 +50,7 @@ public class MessageLogsController(AppDbContext dbContext) : ControllerBase
     [HttpGet("search")]
     public async Task<ActionResult<PagedMessageLogResponse>> Search(
         [FromQuery] string? phoneNumber,
+        [FromQuery] string? whatsAppNumber,
         [FromQuery] string? direction,
         [FromQuery] DateOnly? startDate,
         [FromQuery] DateOnly? endDate,
@@ -43,10 +60,16 @@ public class MessageLogsController(AppDbContext dbContext) : ControllerBase
         [FromQuery] int pageSize = 20,
         CancellationToken cancellationToken = default)
     {
+        var companyId = GetCurrentCompanyId();
+        if (companyId is null)
+        {
+            return Unauthorized("Company not found in token.");
+        }
+
         page = Math.Max(page, 1);
         pageSize = Math.Clamp(pageSize, 5, 100);
 
-        var query = BuildQuery(phoneNumber, direction, startDate, endDate);
+        var query = BuildQuery(companyId.Value, phoneNumber, whatsAppNumber, direction, startDate, endDate);
 
         var orderedQuery = ApplySorting(query, sortBy, sortOrder);
 
@@ -56,6 +79,8 @@ public class MessageLogsController(AppDbContext dbContext) : ControllerBase
             .Take(pageSize)
             .Select(item => new MessageLogResponse(
                 item.Id,
+                item.CompanyId,
+                item.WhatsAppNumber,
                 item.Direction,
                 item.PhoneNumber,
                 item.Content,
@@ -70,6 +95,7 @@ public class MessageLogsController(AppDbContext dbContext) : ControllerBase
     [HttpGet("export")]
     public async Task<IActionResult> Export(
         [FromQuery] string? phoneNumber,
+        [FromQuery] string? whatsAppNumber,
         [FromQuery] string? direction,
         [FromQuery] DateOnly? startDate,
         [FromQuery] DateOnly? endDate,
@@ -77,11 +103,19 @@ public class MessageLogsController(AppDbContext dbContext) : ControllerBase
         [FromQuery] string? sortOrder,
         CancellationToken cancellationToken = default)
     {
-        var query = ApplySorting(BuildQuery(phoneNumber, direction, startDate, endDate), sortBy, sortOrder);
+        var companyId = GetCurrentCompanyId();
+        if (companyId is null)
+        {
+            return Unauthorized("Company not found in token.");
+        }
+
+        var query = ApplySorting(BuildQuery(companyId.Value, phoneNumber, whatsAppNumber, direction, startDate, endDate), sortBy, sortOrder);
 
         var items = await query
             .Select(item => new MessageLogResponse(
                 item.Id,
+                item.CompanyId,
+                item.WhatsAppNumber,
                 item.Direction,
                 item.PhoneNumber,
                 item.Content,
@@ -91,12 +125,14 @@ public class MessageLogsController(AppDbContext dbContext) : ControllerBase
             .ToListAsync(cancellationToken);
 
         var csv = new StringBuilder();
-        csv.AppendLine("Id,Direction,PhoneNumber,Content,IsAutomatic,Status,TimestampUtc");
+        csv.AppendLine("Id,CompanyId,WhatsAppNumber,Direction,PhoneNumber,Content,IsAutomatic,Status,TimestampUtc");
 
         foreach (var item in items)
         {
             csv.AppendLine(string.Join(",",
                 item.Id,
+                item.CompanyId,
+                Csv(item.WhatsAppNumber),
                 Csv(item.Direction),
                 Csv(item.PhoneNumber),
                 Csv(item.Content),
@@ -112,22 +148,28 @@ public class MessageLogsController(AppDbContext dbContext) : ControllerBase
     [HttpGet("dashboard")]
     public async Task<ActionResult<DashboardStatusResponse>> GetDashboard(CancellationToken cancellationToken)
     {
+        var companyId = GetCurrentCompanyId();
+        if (companyId is null)
+        {
+            return Unauthorized("Company not found in token.");
+        }
+
         var todayStart = DateTime.UtcNow.Date;
 
-        var totalIncoming = await dbContext.MessageLogs.CountAsync(item => item.Direction == "Incoming", cancellationToken);
-        var totalOutgoing = await dbContext.MessageLogs.CountAsync(item => item.Direction == "Outgoing", cancellationToken);
-        var totalAutomatic = await dbContext.MessageLogs.CountAsync(item => item.IsAutomatic, cancellationToken);
+        var totalIncoming = await dbContext.MessageLogs.CountAsync(item => item.CompanyId == companyId.Value && item.Direction == "Incoming", cancellationToken);
+        var totalOutgoing = await dbContext.MessageLogs.CountAsync(item => item.CompanyId == companyId.Value && item.Direction == "Outgoing", cancellationToken);
+        var totalAutomatic = await dbContext.MessageLogs.CountAsync(item => item.CompanyId == companyId.Value && item.IsAutomatic, cancellationToken);
 
         var todayIncoming = await dbContext.MessageLogs.CountAsync(
-            item => item.Direction == "Incoming" && item.TimestampUtc >= todayStart,
+            item => item.CompanyId == companyId.Value && item.Direction == "Incoming" && item.TimestampUtc >= todayStart,
             cancellationToken);
 
         var todayOutgoing = await dbContext.MessageLogs.CountAsync(
-            item => item.Direction == "Outgoing" && item.TimestampUtc >= todayStart,
+            item => item.CompanyId == companyId.Value && item.Direction == "Outgoing" && item.TimestampUtc >= todayStart,
             cancellationToken);
 
         var todayAutomatic = await dbContext.MessageLogs.CountAsync(
-            item => item.IsAutomatic && item.TimestampUtc >= todayStart,
+            item => item.CompanyId == companyId.Value && item.IsAutomatic && item.TimestampUtc >= todayStart,
             cancellationToken);
 
         return Ok(new DashboardStatusResponse(
@@ -139,13 +181,61 @@ public class MessageLogsController(AppDbContext dbContext) : ControllerBase
             todayAutomatic));
     }
 
+    [HttpGet("whatsapp-options")]
+    public async Task<ActionResult<WhatsAppFilterOptionsResponse>> GetWhatsAppOptions(CancellationToken cancellationToken)
+    {
+        var companyId = GetCurrentCompanyId();
+        if (companyId is null)
+        {
+            return Unauthorized("Company not found in token.");
+        }
+
+        var numbers = await dbContext.MessageLogs
+            .Where(item => item.CompanyId == companyId.Value && item.WhatsAppNumber != string.Empty)
+            .Select(item => item.WhatsAppNumber)
+            .ToListAsync(cancellationToken);
+
+        var ruleNumbers = await dbContext.ScheduleRuleWhatsAppNumbers
+            .Where(item => dbContext.ScheduleRules.Any(rule => rule.Id == item.ScheduleRuleId && rule.CompanyId == companyId.Value))
+            .Select(item => item.WhatsAppNumber)
+            .ToListAsync(cancellationToken);
+
+        var legacyRuleNumbers = await dbContext.ScheduleRules
+            .Where(item => item.CompanyId == companyId.Value && item.WhatsAppNumber != string.Empty)
+            .Select(item => item.WhatsAppNumber)
+            .ToListAsync(cancellationToken);
+
+        numbers = numbers
+            .Concat(ruleNumbers)
+            .Concat(legacyRuleNumbers)
+            .Concat((await bridgeClient.GetConnectionsAsync(cancellationToken))
+                .Where(item => item.IsConnected && !string.IsNullOrWhiteSpace(item.PhoneNumber))
+                .Select(item => item.PhoneNumber!))
+            .Distinct()
+            .OrderBy(item => item)
+            .ToList();
+
+        return Ok(new WhatsAppFilterOptionsResponse(numbers, null));
+    }
+
     private IQueryable<ApiBotWhatsapp.Api.Models.MessageLog> BuildQuery(
+        int companyId,
         string? phoneNumber,
+        string? whatsAppNumber,
         string? direction,
         DateOnly? startDate,
         DateOnly? endDate)
     {
-        var query = dbContext.MessageLogs.AsNoTracking().AsQueryable();
+        var query = dbContext.MessageLogs.AsNoTracking().Where(item => item.CompanyId == companyId).AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(whatsAppNumber))
+        {
+            var normalizedWhatsApp = new string(whatsAppNumber.Where(char.IsDigit).ToArray());
+            if (!string.IsNullOrWhiteSpace(normalizedWhatsApp))
+            {
+                query = query.Where(item => item.WhatsAppNumber == normalizedWhatsApp);
+            }
+        }
 
         if (!string.IsNullOrWhiteSpace(phoneNumber))
         {

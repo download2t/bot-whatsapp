@@ -1,18 +1,48 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
-import type { UserListItem } from '../types'
+import type { CompanyListItem, UserListItem } from '../types'
 import './UsersList.css'
 
 export function UsersList() {
+  const [searchParams] = useSearchParams()
   const [users, setUsers] = useState<UserListItem[]>([])
+  const [companies, setCompanies] = useState<CompanyListItem[]>([])
+  const [selectedCompanyId, setSelectedCompanyId] = useState<number>(() => Number(searchParams.get('companyId') || localStorage.getItem('bot_company_id') || '0'))
+  const [companyQuery, setCompanyQuery] = useState('')
+  const [isCompanyDropdownOpen, setIsCompanyDropdownOpen] = useState(false)
+  const isCurrentUserAdmin = localStorage.getItem('bot_is_admin') === 'true'
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const companyFilterRef = useRef<HTMLDivElement | null>(null)
+
+  const filteredCompanies = useMemo(() => {
+    const query = companyQuery.trim().toLowerCase()
+    if (!query) {
+      return companies.slice(0, 100)
+    }
+
+    const startsWith = companies.filter((company) =>
+      company.name.toLowerCase().startsWith(query)
+      || company.companyCode.toLowerCase().startsWith(query)
+    )
+
+    const contains = companies.filter((company) =>
+      !startsWith.some((item) => item.id === company.id)
+      && (
+        company.name.toLowerCase().includes(query)
+        || company.companyCode.toLowerCase().includes(query)
+      )
+    )
+
+    return [...startsWith, ...contains].slice(0, 100)
+  }, [companies, companyQuery])
 
   const loadUsers = async () => {
     try {
       setLoading(true)
-      const data = await apiFetch<UserListItem[]>('/api/users')
+      const query = isCurrentUserAdmin && selectedCompanyId > 0 ? `?companyId=${selectedCompanyId}` : ''
+      const data = await apiFetch<UserListItem[]>(`/api/users${query}`)
       setUsers(data || [])
       setError(null)
     } catch (err) {
@@ -24,14 +54,56 @@ export function UsersList() {
   }
 
   useEffect(() => {
-    loadUsers()
+    const load = async () => {
+      if (isCurrentUserAdmin) {
+        try {
+          const companyData = await apiFetch<CompanyListItem[]>('/api/companies')
+          setCompanies(companyData || [])
+          if ((selectedCompanyId <= 0) && companyData && companyData.length > 0) {
+            setSelectedCompanyId(companyData[0].id)
+            return
+          }
+        } catch (err) {
+          console.error('Erro ao carregar empresas:', err)
+        }
+      }
+
+      await loadUsers()
+    }
+
+    void load()
+  }, [isCurrentUserAdmin, selectedCompanyId])
+
+  useEffect(() => {
+    if (!isCurrentUserAdmin) {
+      return
+    }
+
+    const selectedCompany = companies.find((company) => company.id === selectedCompanyId)
+    if (selectedCompany) {
+      setCompanyQuery(selectedCompany.name)
+    }
+  }, [companies, selectedCompanyId, isCurrentUserAdmin])
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (!companyFilterRef.current?.contains(event.target as Node)) {
+        setIsCompanyDropdownOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
   }, [])
 
   const handleDelete = async (id: number) => {
     if (!confirm('Tem certeza que deseja deletar este usuário?')) return
 
     try {
-      await apiFetch<null>(`/api/users/${id}`, {
+      const query = isCurrentUserAdmin && selectedCompanyId > 0 ? `?companyId=${selectedCompanyId}` : ''
+      await apiFetch<null>(`/api/users/${id}${query}`, {
         method: 'DELETE'
       })
       setUsers(users.filter(u => u.id !== id))
@@ -58,7 +130,47 @@ export function UsersList() {
       <h1>👥 Gerenciar Usuários</h1>
 
       <div className="header-actions">
-        <Link to="/users/new" className="btn btn-primary">
+        {isCurrentUserAdmin && (
+          <div className="company-filter-wrapper" ref={companyFilterRef}>
+            <input
+              type="text"
+              value={companyQuery}
+              onFocus={() => setIsCompanyDropdownOpen(true)}
+              onChange={(event) => {
+                setCompanyQuery(event.target.value)
+                setIsCompanyDropdownOpen(true)
+              }}
+              className="company-filter"
+              placeholder="Digite para filtrar empresa (ex: TESTE LTDA)"
+            />
+
+            {isCompanyDropdownOpen && (
+              <div className="company-dropdown">
+                {filteredCompanies.length === 0 ? (
+                  <div className="company-dropdown-empty">Nenhuma empresa encontrada.</div>
+                ) : (
+                  filteredCompanies.map((company) => (
+                    <button
+                      type="button"
+                      key={company.id}
+                      className={`company-dropdown-item ${selectedCompanyId === company.id ? 'active' : ''}`}
+                      onClick={() => {
+                        setSelectedCompanyId(company.id)
+                        setCompanyQuery(company.name)
+                        setIsCompanyDropdownOpen(false)
+                      }}
+                    >
+                      <strong>{company.name}</strong>
+                      <small>{company.companyCode}</small>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        <Link to={isCurrentUserAdmin && selectedCompanyId > 0 ? `/users/new?companyId=${selectedCompanyId}` : '/users/new'} className="btn btn-primary">
           ➕ Novo Usuário
         </Link>
       </div>
@@ -89,7 +201,7 @@ export function UsersList() {
                   <td>{user.fullName || '-'}</td>
                   <td>{formatBrazilTime(user.createdAtUtc)}</td>
                   <td className="actions">
-                    <Link to={`/users/${user.id}/edit`} className="btn btn-sm btn-secondary">
+                    <Link to={isCurrentUserAdmin && selectedCompanyId > 0 ? `/users/${user.id}/edit?companyId=${selectedCompanyId}` : `/users/${user.id}/edit`} className="btn btn-sm btn-secondary">
                       ✏️ Editar
                     </Link>
                     <button

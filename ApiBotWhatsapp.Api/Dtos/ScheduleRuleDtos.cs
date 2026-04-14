@@ -2,6 +2,8 @@ namespace ApiBotWhatsapp.Api.Dtos;
 
 public record ScheduleRuleRequest(
     string Name,
+    IReadOnlyList<string>? WhatsAppNumbers,
+    string? WhatsAppNumber,
     string StartTime,
     string EndTime,
     string Message,
@@ -13,6 +15,8 @@ public record ScheduleRuleRequest(
 public record ScheduleRuleResponse(
     int Id,
     string Name,
+    IReadOnlyList<string> WhatsAppNumbers,
+    string WhatsAppNumber,
     string StartTime,
     string EndTime,
     string Message,

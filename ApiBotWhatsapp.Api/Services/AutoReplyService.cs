@@ -13,6 +13,27 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
     public async Task<WhatsAppWebhookResponse> ProcessIncomingMessageAsync(WhatsAppWebhookRequest request, CancellationToken cancellationToken)
     {
         var normalizedPhone = NormalizePhone(request.PhoneNumber);
+        var normalizedWhatsApp = NormalizePhone(request.WhatsAppNumber ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(normalizedWhatsApp))
+        {
+            normalizedWhatsApp = NormalizePhone(configuration["WhatsApp:DefaultConnectedNumber"] ?? string.Empty);
+        }
+
+        if (string.IsNullOrWhiteSpace(normalizedWhatsApp))
+        {
+            return new WhatsAppWebhookResponse(false, "WhatsAppNumber is required for tenant routing.", null);
+        }
+
+        var companyCode = string.IsNullOrWhiteSpace(request.CompanyCode)
+            ? SeedData.DefaultCompanyCode
+            : request.CompanyCode.Trim();
+
+        var company = await ResolveCompanyAsync(companyCode, normalizedWhatsApp, cancellationToken);
+        if (company is null)
+        {
+            return new WhatsAppWebhookResponse(false, $"Company not found for code: {companyCode}", null);
+        }
+
         var phoneLock = PhoneLocks.GetOrAdd(normalizedPhone, _ => new SemaphoreSlim(1, 1));
         await phoneLock.WaitAsync(cancellationToken);
 
@@ -22,6 +43,8 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
 
             var incomingLog = new MessageLog
             {
+                CompanyId = company.Id,
+                WhatsAppNumber = normalizedWhatsApp,
                 Direction = "Incoming",
                 PhoneNumber = normalizedPhone,
                 Content = request.Message,
@@ -34,7 +57,7 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
             await dbContext.SaveChangesAsync(cancellationToken);
 
             var isInWhitelist = await dbContext.WhitelistNumbers
-                .AnyAsync(item => item.PhoneNumber == normalizedPhone, cancellationToken);
+                .AnyAsync(item => item.CompanyId == company.Id && item.PhoneNumber == normalizedPhone, cancellationToken);
 
             if (isInWhitelist)
             {
@@ -43,7 +66,10 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
 
             var currentTime = GetCurrentRuleTime(configuration["WhatsApp:TimeZoneId"]);
             var matchedRule = await dbContext.ScheduleRules
-                .Where(rule => rule.IsEnabled)
+                .Where(rule => rule.CompanyId == company.Id && rule.IsEnabled)
+                .Where(rule =>
+                    dbContext.ScheduleRuleWhatsAppNumbers.Any(item => item.ScheduleRuleId == rule.Id && item.WhatsAppNumber == normalizedWhatsApp)
+                    || (rule.WhatsAppNumber == normalizedWhatsApp && !dbContext.ScheduleRuleWhatsAppNumbers.Any(item => item.ScheduleRuleId == rule.Id)))
                 .OrderBy(rule => rule.StartTime)
                 .ToListAsync(cancellationToken);
 
@@ -56,7 +82,8 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
             // Check throttle: don't send if already sent within ThrottleMinutes
             if (rule.ThrottleMinutes > 0)
             {
-                var timeSinceLastMessage = await GetTimeSinceLastAutomaticMessageAsync(normalizedPhone, brasiliaTime, cancellationToken);
+                var timeSinceLastMessage = await GetTimeSinceLastAutomaticMessageAsync(company.Id, normalizedPhone, normalizedWhatsApp, brasiliaTime, cancellationToken);
+                
                 if (timeSinceLastMessage.HasValue && timeSinceLastMessage.Value.TotalMinutes < rule.ThrottleMinutes)
                 {
                     return new WhatsAppWebhookResponse(false,
@@ -67,7 +94,7 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
             // Check daily limit
             if (rule.MaxDailyMessagesPerUser.HasValue && rule.MaxDailyMessagesPerUser > 0)
             {
-                var todayMessageCount = await GetTodayAutomaticMessageCountAsync(normalizedPhone, rule.Id, brasiliaTime, cancellationToken);
+                var todayMessageCount = await GetTodayAutomaticMessageCountAsync(company.Id, normalizedPhone, normalizedWhatsApp, rule.Id, brasiliaTime, cancellationToken);
                 if (todayMessageCount >= rule.MaxDailyMessagesPerUser)
                 {
                     return new WhatsAppWebhookResponse(false,
@@ -75,10 +102,12 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
                 }
             }
 
-            var dispatchResult = await messageSender.SendMessageAsync(normalizedPhone, rule.Message, true, cancellationToken);
+            var dispatchResult = await messageSender.SendMessageAsync(normalizedPhone, rule.Message, true, normalizedWhatsApp, cancellationToken);
 
             var outgoingLog = new MessageLog
             {
+                CompanyId = company.Id,
+                WhatsAppNumber = normalizedWhatsApp,
                 Direction = "Outgoing",
                 PhoneNumber = normalizedPhone,
                 Content = rule.Message,
@@ -122,10 +151,12 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
         return now >= start || now < end;
     }
 
-    private async Task<TimeSpan?> GetTimeSinceLastAutomaticMessageAsync(string phoneNumber, DateTime nowReference, CancellationToken cancellationToken)
+    private async Task<TimeSpan?> GetTimeSinceLastAutomaticMessageAsync(int companyId, string phoneNumber, string whatsAppNumber, DateTime nowReference, CancellationToken cancellationToken)
     {
         var lastMessage = await dbContext.MessageLogs
-            .Where(m => m.PhoneNumber == phoneNumber 
+            .Where(m => m.CompanyId == companyId
+                && m.WhatsAppNumber == whatsAppNumber
+                && m.PhoneNumber == phoneNumber 
                 && m.IsAutomatic 
                 && m.Direction == "Outgoing")
             .OrderByDescending(m => m.TimestampUtc)
@@ -137,13 +168,15 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
         return nowReference - lastMessage.TimestampUtc;
     }
 
-    private async Task<int> GetTodayAutomaticMessageCountAsync(string phoneNumber, int ruleId, DateTime brasiliaTime, CancellationToken cancellationToken)
+    private async Task<int> GetTodayAutomaticMessageCountAsync(int companyId, string phoneNumber, string whatsAppNumber, int ruleId, DateTime brasiliaTime, CancellationToken cancellationToken)
     {
         var todayStart = brasiliaTime.Date;
         var todayEnd = todayStart.AddDays(1);
 
         return await dbContext.MessageLogs
-            .CountAsync(m => m.PhoneNumber == phoneNumber 
+            .CountAsync(m => m.CompanyId == companyId
+                && m.WhatsAppNumber == whatsAppNumber
+                && m.PhoneNumber == phoneNumber 
                 && m.IsAutomatic 
                 && m.Direction == "Outgoing"
                 && m.TimestampUtc >= todayStart
@@ -199,5 +232,55 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
         {
             return DateTime.Now;
         }
+    }
+
+    private async Task<Company?> ResolveCompanyAsync(string companyCode, string normalizedWhatsApp, CancellationToken cancellationToken)
+    {
+        var company = await dbContext.Companies.FirstOrDefaultAsync(c => c.UniqueCode == companyCode, cancellationToken);
+        if (company is not null)
+        {
+            return company;
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedWhatsApp))
+        {
+            var companyIdsByRules = await dbContext.ScheduleRules
+                .Where(rule =>
+                    dbContext.ScheduleRuleWhatsAppNumbers.Any(item => item.ScheduleRuleId == rule.Id && item.WhatsAppNumber == normalizedWhatsApp)
+                    || (rule.WhatsAppNumber == normalizedWhatsApp && !dbContext.ScheduleRuleWhatsAppNumbers.Any(item => item.ScheduleRuleId == rule.Id)))
+                .Select(rule => rule.CompanyId)
+                .Distinct()
+                .Take(2)
+                .ToListAsync(cancellationToken);
+
+            if (companyIdsByRules.Count == 1)
+            {
+                return await dbContext.Companies.FirstOrDefaultAsync(c => c.Id == companyIdsByRules[0], cancellationToken);
+            }
+
+            var companyIdsByLogs = await dbContext.MessageLogs
+                .Where(item => item.WhatsAppNumber == normalizedWhatsApp)
+                .Select(item => item.CompanyId)
+                .Distinct()
+                .Take(2)
+                .ToListAsync(cancellationToken);
+
+            if (companyIdsByLogs.Count == 1)
+            {
+                return await dbContext.Companies.FirstOrDefaultAsync(c => c.Id == companyIdsByLogs[0], cancellationToken);
+            }
+        }
+
+        var allCompanyIds = await dbContext.Companies
+            .Select(item => item.Id)
+            .Take(2)
+            .ToListAsync(cancellationToken);
+
+        if (allCompanyIds.Count == 1)
+        {
+            return await dbContext.Companies.FirstOrDefaultAsync(c => c.Id == allCompanyIds[0], cancellationToken);
+        }
+
+        return null;
     }
 }

@@ -24,6 +24,11 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   if (response.status === 401) {
     localStorage.removeItem('bot_jwt')
     localStorage.removeItem('bot_user')
+    localStorage.removeItem('bot_company_id')
+    localStorage.removeItem('bot_company_name')
+    localStorage.removeItem('bot_company_code')
+    localStorage.removeItem('bot_companies')
+    localStorage.removeItem('bot_is_admin')
     window.dispatchEvent(new Event('auth-expired'))
     throw new Error('Sessao expirada. Faca login novamente.')
   }

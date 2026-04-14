@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
-import type { ScheduleRule } from '../types'
+import type { ScheduleRule, WhatsAppFilterOptions } from '../types'
 import './ScheduleRules.css'
 
 type FormData = Omit<ScheduleRule, 'id' | 'createdAtUtc'>
@@ -12,8 +12,11 @@ export function ScheduleRuleForm() {
   const [loading, setLoading] = useState(id ? true : false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [whatsAppOptions, setWhatsAppOptions] = useState<string[]>([])
   const [form, setForm] = useState<FormData>({
     name: '',
+    whatsAppNumbers: [],
+    whatsAppNumber: '',
     startTime: '08:00',
     endTime: '10:00',
     message: '',
@@ -24,8 +27,19 @@ export function ScheduleRuleForm() {
   })
 
   useEffect(() => {
+    const loadWhatsAppOptions = async () => {
+      try {
+        const options = await apiFetch<WhatsAppFilterOptions>('/api/schedule-rules/whatsapp-options')
+        setWhatsAppOptions(options.numbers || [])
+      } catch {
+        // optional metadata endpoint
+      }
+    }
+
+    void loadWhatsAppOptions()
+
     if (id) {
-      loadRule()
+      void loadRule()
     }
   }, [id])
 
@@ -34,6 +48,10 @@ export function ScheduleRuleForm() {
       const rule = await apiFetch<ScheduleRule>(`/api/schedule-rules/${id}`)
       setForm({
         name: rule.name,
+        whatsAppNumbers: (rule.whatsAppNumbers && rule.whatsAppNumbers.length > 0)
+          ? rule.whatsAppNumbers
+          : (rule.whatsAppNumber ? [rule.whatsAppNumber] : []),
+        whatsAppNumber: rule.whatsAppNumber,
         startTime: rule.startTime,
         endTime: rule.endTime,
         message: rule.message,
@@ -57,10 +75,26 @@ export function ScheduleRuleForm() {
 
     setForm(prev => ({
       ...prev,
-      [name]: type === 'checkbox' ? checked : 
-              type === 'number' ? (value === '' ? null : parseInt(value)) :
-              value
+      [name]: type === 'checkbox'
+        ? checked
+        : type === 'number'
+          ? (value === '' ? null : parseInt(value, 10))
+          : value
     }))
+  }
+
+  const handleWhatsAppNumberToggle = (number: string, isChecked: boolean) => {
+    setForm(prev => {
+      const nextNumbers = isChecked
+        ? Array.from(new Set([...prev.whatsAppNumbers, number]))
+        : prev.whatsAppNumbers.filter(item => item !== number)
+
+      return {
+        ...prev,
+        whatsAppNumbers: nextNumbers,
+        whatsAppNumber: nextNumbers[0] || ''
+      }
+    })
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -68,10 +102,16 @@ export function ScheduleRuleForm() {
     setSubmitting(true)
     setError(null)
 
-    if (!form.name.trim() || !form.message.trim()) {
-      setError('Nome e mensagem são obrigatórios')
+    if (!form.name.trim() || !form.message.trim() || form.whatsAppNumbers.length === 0) {
+      setError('Nome, pelo menos um numero WhatsApp e mensagem são obrigatórios')
       setSubmitting(false)
       return
+    }
+
+    const payload = {
+      ...form,
+      whatsAppNumbers: form.whatsAppNumbers,
+      whatsAppNumber: form.whatsAppNumbers[0] || ''
     }
 
     try {
@@ -80,7 +120,7 @@ export function ScheduleRuleForm() {
 
       await apiFetch<ScheduleRule>(endpoint, {
         method,
-        body: JSON.stringify(form)
+        body: JSON.stringify(payload)
       })
       
       navigate('/rules')
@@ -109,6 +149,38 @@ export function ScheduleRuleForm() {
         {/* SEÇÃO: INFORMAÇÕES BÁSICAS */}
         <fieldset className="form-section">
           <legend>📋 Informações Básicas</legend>
+
+          <div className="form-group">
+            <label htmlFor="whatsAppNumbers">Numeros WhatsApp conectados *</label>
+
+            <div className="checkbox-number-list" id="whatsAppNumbers" role="group" aria-label="Numeros WhatsApp conectados">
+              {whatsAppOptions.length === 0 && (
+                <p className="checkbox-number-empty">Nenhum numero conectado disponivel.</p>
+              )}
+
+              {whatsAppOptions.map((number) => {
+                const selected = form.whatsAppNumbers.includes(number)
+                return (
+                  <label
+                    key={number}
+                    className={`checkbox-number-item ${selected ? 'selected' : ''}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={(event) => handleWhatsAppNumberToggle(number, event.target.checked)}
+                    />
+                    <span>{number}</span>
+                  </label>
+                )
+              })}
+            </div>
+
+            <small>
+              Selecione um ou mais numeros conectados.
+              {whatsAppOptions.length === 0 ? ' Nenhum numero disponível para seleção.' : ''}
+            </small>
+          </div>
 
           <div className="form-group">
             <label htmlFor="name">Nome da Regra *</label>
@@ -294,6 +366,7 @@ export function ScheduleRuleForm() {
           <h3>📝 Resumo da Configuração</h3>
           <div className="preview-content">
             <p><strong>Nome:</strong> {form.name || '(não preenchido)'}</p>
+            <p><strong>WhatsApp:</strong> {form.whatsAppNumbers.length > 0 ? form.whatsAppNumbers.join(', ') : '(não preenchido)'}</p>
             <p>
               <strong>Horário:</strong> {form.isOutOfBusinessHours ? '🌙 FORA DE' : '⏰'}
               {form.startTime} até {form.endTime}

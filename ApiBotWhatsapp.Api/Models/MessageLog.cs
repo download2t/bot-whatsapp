@@ -6,6 +6,11 @@ public class MessageLog
 {
     public int Id { get; set; }
 
+    public int CompanyId { get; set; }
+
+    [MaxLength(20)]
+    public string WhatsAppNumber { get; set; } = string.Empty;
+
     [Required]
     [MaxLength(20)]
     public string Direction { get; set; } = "Incoming";
