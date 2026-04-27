@@ -1,3 +1,4 @@
+# Local bridge dependencies and state
 node_modules/
 .env
 .wwebjs_auth/
