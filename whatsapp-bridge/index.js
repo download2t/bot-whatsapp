@@ -3,12 +3,9 @@ import express from 'express';
 import cors from 'cors';
 import axios from 'axios';
 import qrcode from 'qrcode';
-import { spawnSync } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
 import whatsappWebJs from 'whatsapp-web.js';
 
-const { Client, LocalAuth } = whatsappWebJs;
+const { Client } = whatsappWebJs;
 
 const app = express();
 app.use(cors());
@@ -18,13 +15,11 @@ const port = Number(process.env.BRIDGE_PORT ?? 3001);
 const backendWebhookUrl = process.env.BACKEND_WEBHOOK_URL ?? 'http://localhost:5207/api/webhooks/whatsapp';
 const backendWebhookToken = process.env.BACKEND_WEBHOOK_TOKEN ?? 'CHANGE_THIS_WEBHOOK_TOKEN';
 const backendCompanyCode = process.env.BACKEND_COMPANY_CODE ?? 'EMPRESA-TESTE';
-const authRootDir = path.resolve(process.cwd(), '.wwebjs_auth');
 
 let apiAvailable = false;
 let sessionCounter = 1;
 
 const sessions = new Map();
-const sessionFolderPrefix = 'session-api-bot-whatsapp-';
 
 function normalizePhone(raw) {
   return String(raw ?? '').replace(/\D/g, '');
@@ -49,51 +44,6 @@ function buildSessionId() {
       return id;
     }
   }
-}
-
-function getPersistedSessionIds() {
-  const ids = new Set();
-
-  try {
-    if (fs.existsSync(authRootDir)) {
-      const entries = fs.readdirSync(authRootDir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (!entry.isDirectory() || !entry.name.startsWith(sessionFolderPrefix)) {
-          continue;
-        }
-
-        const id = entry.name.slice(sessionFolderPrefix.length).trim();
-        if (id) {
-          ids.add(id);
-        }
-      }
-    }
-  } catch {
-    // Ignore read errors and fallback to default session.
-  }
-
-  if (ids.size === 0) {
-    ids.add('default');
-  }
-
-  return Array.from(ids);
-}
-
-function cleanupStaleBrowserProcesses() {
-  if (process.platform !== 'win32') {
-    return;
-  }
-
-  const script = `
-    $target = ${JSON.stringify(authRootDir)}
-    Get-CimInstance Win32_Process |
-      Where-Object { $_.Name -eq 'chrome.exe' -and $_.CommandLine -like "*$target*" } |
-      ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
-  `;
-
-  spawnSync('powershell', ['-NoProfile', '-Command', script], {
-    stdio: 'ignore',
-  });
 }
 
 async function refreshApiAvailability() {
@@ -127,7 +77,6 @@ function ensureSession(id) {
   }
 
   const client = new Client({
-    authStrategy: new LocalAuth({ clientId: `api-bot-whatsapp-${sessionId}` }),
     puppeteer: {
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
@@ -243,7 +192,6 @@ async function initializeSessionIfNeeded(session) {
   try {
     session.isInitializing = true;
     session.status = 'connecting';
-    cleanupStaleBrowserProcesses();
     await session.client.initialize();
   } catch (error) {
     session.lastError = error?.message ?? 'Unable to initialize WhatsApp client';
@@ -490,13 +438,7 @@ app.listen(port, () => {
   console.log(`WhatsApp bridge running on http://localhost:${port}`);
   console.log(`Backend webhook target: ${backendWebhookUrl}`);
   void refreshApiAvailability();
-
-  const restoredIds = getPersistedSessionIds();
-  console.log(`Restoring ${restoredIds.length} persisted session(s): ${restoredIds.join(', ')}`);
-  for (const id of restoredIds) {
-    const session = ensureSession(id);
-    void initializeSessionIfNeeded(session);
-  }
+  console.log('Persistent WhatsApp sessions are disabled. Each start begins with a clean in-memory state.');
 });
 
 process.on('SIGINT', async () => {

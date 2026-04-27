@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^Set-Location 'D:\\\\PROJETOS\\\\api_bot_whatsapp\\\\whatsapp-bridge'; node --check index\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
