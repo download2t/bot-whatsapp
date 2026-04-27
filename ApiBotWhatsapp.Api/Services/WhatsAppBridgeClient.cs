@@ -7,15 +7,21 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
 {
     private readonly HttpClient _client = httpClientFactory.CreateClient(nameof(WhatsAppBridgeClient));
 
-    private string? BaseUrl => configuration["WhatsApp:BridgeBaseUrl"];
+    private string BaseUrl
+    {
+        get
+        {
+            var configured = configuration["WhatsApp:BridgeBaseUrl"];
+            var baseUrl = string.IsNullOrWhiteSpace(configured)
+                ? "http://localhost:3001"
+                : configured;
+
+            return baseUrl.TrimEnd('/');
+        }
+    }
 
     public async Task<IReadOnlyList<WhatsAppConnectionItemResponse>> GetConnectionsAsync(CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(BaseUrl))
-        {
-            return [];
-        }
-
         try
         {
             var result = await _client.GetFromJsonAsync<List<WhatsAppConnectionItemResponse>>(
@@ -31,11 +37,6 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
 
     public async Task<WhatsAppConnectionStatusResponse?> GetStatusAsync(CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(BaseUrl))
-        {
-            return null;
-        }
-
         try
         {
             var connections = await GetConnectionsAsync(cancellationToken);
@@ -65,11 +66,6 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
 
     public async Task<string?> GetQrAsync(string? sessionId, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(BaseUrl))
-        {
-            return null;
-        }
-
         HttpResponseMessage response;
         try
         {
@@ -94,11 +90,6 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
 
     public async Task<string?> CreateConnectionAsync(CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(BaseUrl))
-        {
-            return null;
-        }
-
         try
         {
             var response = await _client.PostAsync($"{BaseUrl}/session/create", null, cancellationToken);
@@ -118,11 +109,6 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
 
     public async Task<bool> ConnectAsync(string? sessionId, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(BaseUrl))
-        {
-            return false;
-        }
-
         try
         {
             var sessionPath = string.IsNullOrWhiteSpace(sessionId)
@@ -139,11 +125,6 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
 
     public async Task<bool> DisconnectAsync(string? sessionId, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(BaseUrl))
-        {
-            return false;
-        }
-
         try
         {
             var sessionPath = string.IsNullOrWhiteSpace(sessionId)
@@ -160,11 +141,6 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
 
     public async Task<string?> GetPairingCodeAsync(string phoneNumber, string? sessionId, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(BaseUrl))
-        {
-            return null;
-        }
-
         try
         {
             var sessionPath = string.IsNullOrWhiteSpace(sessionId)
@@ -191,11 +167,6 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
 
     public async Task<(bool Success, string Status)> SendMessageAsync(string phoneNumber, string message, bool markAsUnread, string? sourceWhatsAppNumber, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(BaseUrl))
-        {
-            return (false, "WhatsApp bridge is not configured.");
-        }
-
         HttpResponseMessage response;
         try
         {

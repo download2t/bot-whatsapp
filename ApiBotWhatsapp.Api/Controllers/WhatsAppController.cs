@@ -12,11 +12,6 @@ public class WhatsAppController(WhatsAppBridgeClient bridgeClient) : ControllerB
     public async Task<ActionResult<IEnumerable<WhatsAppConnectionItemResponse>>> GetConnections(CancellationToken cancellationToken)
     {
         var connections = await bridgeClient.GetConnectionsAsync(cancellationToken);
-        if (connections.Count == 0)
-        {
-            return NotFound("WhatsApp bridge is not configured.");
-        }
-
         return Ok(connections);
     }
 
