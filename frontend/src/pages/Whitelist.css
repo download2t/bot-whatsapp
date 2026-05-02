@@ -14,6 +14,24 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
+.search-box {
+  margin-bottom: 1.25rem;
+}
+
+.input-search {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+
+.input-search:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
 .input-name {
   flex: 1;
   padding: 0.75rem;
@@ -64,6 +82,13 @@
   flex: 1;
 }
 
+.edit-form {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
 .item-name {
   font-size: 0.95rem;
   font-weight: 700;
@@ -84,7 +109,15 @@
   color: #999;
 }
 
-.whitelist-item .btn-danger {
+.item-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.whitelist-item .btn-danger,
+.whitelist-item .btn-secondary,
+.whitelist-item .btn-primary {
   white-space: nowrap;
 }
 
@@ -103,7 +136,20 @@
     align-items: flex-start;
   }
 
-  .whitelist-item .btn-danger {
+  .edit-form {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
+  .item-actions {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .whitelist-item .btn-danger,
+  .whitelist-item .btn-secondary,
+  .whitelist-item .btn-primary,
+  .whitelist-item .btn {
     width: 100%;
   }
 }

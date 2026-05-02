@@ -3,6 +3,8 @@
         "/^Set-Location 'D:\\\\PROJETOS\\\\api_bot_whatsapp\\\\whatsapp-bridge'; node --check index\\.js$/": {
             "approve": true,
             "matchCommandLine": true
-        }
+        },
+        "dotnet build": true,
+        "npm run build": true
     }
 }

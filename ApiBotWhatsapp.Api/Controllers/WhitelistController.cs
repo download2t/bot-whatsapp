@@ -136,6 +136,52 @@ public class WhitelistController(AppDbContext dbContext) : ControllerBase
         return NoContent();
     }
 
+    [HttpPut("{id:int}")]
+    public async Task<ActionResult<WhitelistResponse>> Update(int id, [FromBody] WhitelistRequest request, CancellationToken cancellationToken)
+    {
+        var companyId = GetCurrentCompanyId();
+        if (companyId is null)
+        {
+            return Unauthorized("Company not found in token.");
+        }
+
+        // Only admins and gestores can update whitelist
+        var isGestor = await IsUserGestorOfCompanyAsync(companyId.Value, cancellationToken);
+        if (!isGestor)
+        {
+            return Forbid("Only administrators and gestores can modify whitelist.");
+        }
+
+        var entity = await dbContext.WhitelistNumbers
+            .FirstOrDefaultAsync(item => item.Id == id && item.CompanyId == companyId.Value, cancellationToken);
+        if (entity is null)
+        {
+            return NotFound();
+        }
+
+        var normalized = NormalizePhone(request.PhoneNumber);
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return BadRequest("Phone number is required.");
+        }
+
+        var duplicated = await dbContext.WhitelistNumbers.AnyAsync(
+            item => item.CompanyId == companyId.Value && item.PhoneNumber == normalized && item.Id != id,
+            cancellationToken);
+        if (duplicated)
+        {
+            return Conflict("Number is already in whitelist.");
+        }
+
+        var name = request.Name?.Trim();
+        entity.Name = string.IsNullOrWhiteSpace(name) ? null : name;
+        entity.PhoneNumber = normalized;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new WhitelistResponse(entity.Id, entity.Name, entity.PhoneNumber, entity.CreatedAtUtc));
+    }
+
     private static string NormalizePhone(string value)
     {
         var digits = value.Where(char.IsDigit).ToArray();
