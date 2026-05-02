@@ -1,6 +1,7 @@
 using ApiBotWhatsapp.Api.Data;
 using ApiBotWhatsapp.Api.Dtos;
 using ApiBotWhatsapp.Api.Models;
+using ApiBotWhatsapp.Api.Utils;
 using Microsoft.EntityFrameworkCore;
 using System.Collections.Concurrent;
 
@@ -13,11 +14,11 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
 
     public async Task<WhatsAppWebhookResponse> ProcessIncomingMessageAsync(WhatsAppWebhookRequest request, CancellationToken cancellationToken)
     {
-        var normalizedPhone = NormalizePhone(request.PhoneNumber);
-        var normalizedWhatsApp = NormalizePhone(request.WhatsAppNumber ?? string.Empty);
+        var normalizedPhone = PhoneNumberUtils.Normalize(request.PhoneNumber);
+        var normalizedWhatsApp = PhoneNumberUtils.Normalize(request.WhatsAppNumber ?? string.Empty);
         if (string.IsNullOrWhiteSpace(normalizedWhatsApp))
         {
-            normalizedWhatsApp = NormalizePhone(configuration["WhatsApp:DefaultConnectedNumber"] ?? string.Empty);
+            normalizedWhatsApp = PhoneNumberUtils.Normalize(configuration["WhatsApp:DefaultConnectedNumber"] ?? string.Empty);
         }
 
         if (string.IsNullOrWhiteSpace(normalizedWhatsApp))
@@ -61,8 +62,9 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
             dbContext.MessageLogs.Add(incomingLog);
             await dbContext.SaveChangesAsync(cancellationToken);
 
+            var equivalentPhoneNumbers = PhoneNumberUtils.GetEquivalentBrazilianNumbers(normalizedPhone);
             var isInWhitelist = await dbContext.WhitelistNumbers
-                .AnyAsync(item => item.CompanyId == company.Id && item.PhoneNumber == normalizedPhone, cancellationToken);
+                .AnyAsync(item => item.CompanyId == company.Id && equivalentPhoneNumbers.Contains(item.PhoneNumber), cancellationToken);
 
             if (isInWhitelist)
             {
@@ -192,12 +194,6 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
                 && m.TimestampUtc >= todayStart
                 && m.TimestampUtc < todayEnd,
                 cancellationToken);
-    }
-
-    private static string NormalizePhone(string phone)
-    {
-        var digits = phone.Where(char.IsDigit).ToArray();
-        return new string(digits);
     }
 
     private static TimeSpan GetCurrentRuleTime(string? configuredTimeZoneId)

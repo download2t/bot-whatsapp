@@ -1,6 +1,7 @@
 using ApiBotWhatsapp.Api.Data;
 using ApiBotWhatsapp.Api.Dtos;
 using ApiBotWhatsapp.Api.Models;
+using ApiBotWhatsapp.Api.Utils;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -80,15 +81,19 @@ public class WhitelistController(AppDbContext dbContext) : ControllerBase
             return Forbid("Only administrators and gestores can modify whitelist.");
         }
 
-        var normalized = NormalizePhone(request.PhoneNumber);
+        var normalized = PhoneNumberUtils.Normalize(request.PhoneNumber);
         if (string.IsNullOrWhiteSpace(normalized))
         {
             return BadRequest("Phone number is required.");
         }
 
+        var equivalentNumbers = PhoneNumberUtils.GetEquivalentBrazilianNumbers(normalized);
+
         var name = request.Name?.Trim();
 
-        var exists = await dbContext.WhitelistNumbers.AnyAsync(item => item.CompanyId == companyId.Value && item.PhoneNumber == normalized, cancellationToken);
+        var exists = await dbContext.WhitelistNumbers.AnyAsync(
+            item => item.CompanyId == companyId.Value && equivalentNumbers.Contains(item.PhoneNumber),
+            cancellationToken);
         if (exists)
         {
             return Conflict("Number is already in whitelist.");
@@ -159,14 +164,16 @@ public class WhitelistController(AppDbContext dbContext) : ControllerBase
             return NotFound();
         }
 
-        var normalized = NormalizePhone(request.PhoneNumber);
+        var normalized = PhoneNumberUtils.Normalize(request.PhoneNumber);
         if (string.IsNullOrWhiteSpace(normalized))
         {
             return BadRequest("Phone number is required.");
         }
 
+        var equivalentNumbers = PhoneNumberUtils.GetEquivalentBrazilianNumbers(normalized);
+
         var duplicated = await dbContext.WhitelistNumbers.AnyAsync(
-            item => item.CompanyId == companyId.Value && item.PhoneNumber == normalized && item.Id != id,
+            item => item.CompanyId == companyId.Value && equivalentNumbers.Contains(item.PhoneNumber) && item.Id != id,
             cancellationToken);
         if (duplicated)
         {
@@ -180,11 +187,5 @@ public class WhitelistController(AppDbContext dbContext) : ControllerBase
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return Ok(new WhitelistResponse(entity.Id, entity.Name, entity.PhoneNumber, entity.CreatedAtUtc));
-    }
-
-    private static string NormalizePhone(string value)
-    {
-        var digits = value.Where(char.IsDigit).ToArray();
-        return new string(digits);
     }
 }
