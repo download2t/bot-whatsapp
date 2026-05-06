@@ -23,17 +23,31 @@ public class BulkMessagesController(AppDbContext dbContext, WhatsAppMessageSende
         var companyId = GetCurrentCompanyId();
         if (companyId is null) return Unauthorized();
 
-        // Resolve contacts from turma or explicit ids
-        var contactsQuery = dbContext.Contatos.Where(c => c.CompanyId == companyId.Value && c.TurmaId == req.TurmaId);
-
+        // Resolve contacts: prioritize explicit ContactIds, then fall back to TurmaId
+        IQueryable<Contato> contactsQuery;
+        
         if (req.ContactIds is not null && req.ContactIds.Count > 0)
         {
-            contactsQuery = contactsQuery.Where(c => req.ContactIds.Contains(c.Id));
+            // If ContactIds are explicitly provided, use only those
+            contactsQuery = dbContext.Contatos.Where(c => 
+                c.CompanyId == companyId.Value && 
+                req.ContactIds.Contains(c.Id));
+        }
+        else if (req.TurmaId > 0)
+        {
+            // Otherwise, use all contacts from the turma
+            contactsQuery = dbContext.Contatos.Where(c => 
+                c.CompanyId == companyId.Value && 
+                c.TurmaId == req.TurmaId);
+        }
+        else
+        {
+            return BadRequest("Either TurmaId must be > 0 or ContactIds must be provided.");
         }
 
         var contacts = await contactsQuery.ToListAsync(cancellationToken);
 
-        if (!contacts.Any()) return BadRequest("No contacts found for the given turma/selection.");
+        if (!contacts.Any()) return BadRequest($"No contacts found for turma/selection. (TurmaId: {req.TurmaId}, ContactIds: {req.ContactIds?.Count ?? 0})");
 
         var results = new List<BulkSendResult>();
 
@@ -43,9 +57,9 @@ public class BulkMessagesController(AppDbContext dbContext, WhatsAppMessageSende
         foreach (var c in contacts)
         {
             var personalized = $"{greeting} {c.Name}!\n{body}";
-            var (success, status) = await sender.SendMessageAsync(c.PhoneNumber, personalized, req.MarkAsUnread, req.SourceWhatsAppNumber, cancellationToken);
+            var normalizedPhone = PhoneNumberUtils.Normalize(c.PhoneNumber);
+            var (success, status) = await sender.SendMessageAsync(normalizedPhone, personalized, req.MarkAsUnread, req.SourceWhatsAppNumber, cancellationToken);
 
-            // Log could be added here (MessageLog) - keeping simple for now
             results.Add(new BulkSendResult(c.Id, c.PhoneNumber, success, status));
         }
 
