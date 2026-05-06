@@ -5,6 +5,8 @@
             "matchCommandLine": true
         },
         "dotnet build": true,
-        "npm run build": true
+        "npm run build": true,
+        "dotnet ef": true,
+        "Get-Process": true
     }
 }

@@ -12,6 +12,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<ScheduleRuleWhatsAppNumber> ScheduleRuleWhatsAppNumbers => Set<ScheduleRuleWhatsAppNumber>();
     public DbSet<WhitelistNumber> WhitelistNumbers => Set<WhitelistNumber>();
     public DbSet<MessageLog> MessageLogs => Set<MessageLog>();
+    public DbSet<Turma> Turmas => Set<Turma>();
+    public DbSet<Contato> Contatos => Set<Contato>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -35,6 +37,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         modelBuilder.Entity<MessageLog>()
             .HasIndex(log => new { log.CompanyId, log.WhatsAppNumber, log.TimestampUtc });
+
+        modelBuilder.Entity<Turma>()
+            .HasIndex(t => new { t.CompanyId, t.Name });
+
+        modelBuilder.Entity<Contato>()
+            .HasIndex(c => new { c.CompanyId, c.PhoneNumber });
 
         modelBuilder.Entity<ScheduleRule>()
             .HasIndex(rule => new { rule.CompanyId, rule.WhatsAppNumber });

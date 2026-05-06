@@ -6,6 +6,11 @@ import type { CompanyOption, LoginResponse } from './types'
 import { Dashboard } from './pages/Dashboard'
 import { LoginPage } from './pages/LoginPage.tsx'
 import { Messages } from './pages/Messages'
+import { TurmasList } from './pages/TurmasList'
+import { TurmaForm } from './pages/TurmaForm'
+import { ContatosList } from './pages/ContatosList'
+import { ContatoForm } from './pages/ContatoForm'
+import { BulkMessages } from './pages/BulkMessages'
 import { ProfilePage } from './pages/ProfilePage'
 import { ScheduleRulesList } from './pages/ScheduleRulesList'
 import { ScheduleRuleForm } from './pages/ScheduleRuleForm'
@@ -222,6 +227,13 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/messages" element={<Messages />} />
+        <Route path="/messages/bulk" element={<BulkMessages />} />
+        <Route path="/turmas" element={<TurmasList />} />
+        <Route path="/turmas/new" element={<TurmaForm />} />
+        <Route path="/turmas/:id/edit" element={<TurmaForm />} />
+        <Route path="/contatos" element={<ContatosList />} />
+        <Route path="/contatos/new" element={<ContatoForm />} />
+        <Route path="/contatos/:id/edit" element={<ContatoForm />} />
         <Route path="/rules" element={!isAdmin && userTitle === 'Operador' ? <Navigate to="/" replace /> : <ScheduleRulesList />} />
         <Route path="/rules/new" element={!isAdmin && userTitle === 'Operador' ? <Navigate to="/" replace /> : <ScheduleRuleForm />} />
         <Route path="/rules/edit/:id" element={!isAdmin && userTitle === 'Operador' ? <Navigate to="/" replace /> : <ScheduleRuleForm />} />

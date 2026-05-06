@@ -160,6 +160,11 @@ export function Navigation({
               Mensagens
             </Link>
           </li>
+          <li className="nav-item">
+            <Link to="/messages/bulk" className={`nav-link ${isActive('/messages/bulk')}`} onClick={closeMenus}>
+              Enviar Mensagens (Lote)
+            </Link>
+          </li>
           {(isAdmin || userTitle === 'Gestor') && (
             <>
               <li className="nav-item">
@@ -170,6 +175,16 @@ export function Navigation({
               <li className="nav-item">
                 <Link to="/whitelist" className={`nav-link ${isActive('/whitelist')}`} onClick={closeMenus}>
                   Whitelist
+                </Link>
+              </li>
+              <li className="nav-item">
+                <Link to="/turmas" className={`nav-link ${isActive('/turmas')}`} onClick={closeMenus}>
+                  Turmas
+                </Link>
+              </li>
+              <li className="nav-item">
+                <Link to="/contatos" className={`nav-link ${isActive('/contatos')}`} onClick={closeMenus}>
+                  Contatos
                 </Link>
               </li>
               <li className="nav-item">

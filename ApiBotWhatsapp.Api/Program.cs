@@ -81,6 +81,7 @@ using (var scope = app.Services.CreateScope())
     await EnsureCompanyAndTenantColumnsAsync(dbContext);
     await EnsureScheduleRuleColumnsAsync(dbContext);
     await EnsureUserColumnsAsync(dbContext);
+    await EnsureContatosAndTurmasTablesAsync(dbContext);
     await SeedData.InitializeAsync(dbContext);
     await EnsureTenantDataConsistencyAsync(dbContext);
 }
@@ -343,4 +344,32 @@ static async Task EnsureUserColumnsAsync(AppDbContext dbContext)
     }
 
     await dbContext.Database.ExecuteSqlRawAsync("UPDATE Users SET IsAdmin = 1 WHERE lower(Username) = 'admin';");
+}
+
+static async Task EnsureContatosAndTurmasTablesAsync(AppDbContext dbContext)
+{
+    await dbContext.Database.ExecuteSqlRawAsync(@"
+CREATE TABLE IF NOT EXISTS Turmas (
+    Id INTEGER NOT NULL CONSTRAINT PK_Turmas PRIMARY KEY AUTOINCREMENT,
+    CompanyId INTEGER NOT NULL,
+    Name TEXT NOT NULL,
+    IsActive INTEGER NOT NULL DEFAULT 1,
+    CreatedAtUtc TEXT NOT NULL
+);");
+
+    await dbContext.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_Turmas_CompanyId_Name ON Turmas(CompanyId, Name);");
+
+    await dbContext.Database.ExecuteSqlRawAsync(@"
+CREATE TABLE IF NOT EXISTS Contatos (
+    Id INTEGER NOT NULL CONSTRAINT PK_Contatos PRIMARY KEY AUTOINCREMENT,
+    CompanyId INTEGER NOT NULL,
+    Name TEXT NOT NULL,
+    PhoneNumber TEXT NOT NULL,
+    TurmaId INTEGER,
+    IsActive INTEGER NOT NULL DEFAULT 1,
+    CreatedAtUtc TEXT NOT NULL,
+    FOREIGN KEY(TurmaId) REFERENCES Turmas(Id)
+);");
+
+    await dbContext.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_Contatos_CompanyId_PhoneNumber ON Contatos(CompanyId, PhoneNumber);");
 }

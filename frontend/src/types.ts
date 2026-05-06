@@ -137,3 +137,17 @@ export type WhatsAppFilterOptions = {
   numbers: string[]
   fixedNumber: string | null
 }
+
+export type Turma = {
+  id: number
+  name: string
+  isActive: boolean
+}
+
+export type Contato = {
+  id: number
+  name: string
+  phoneNumber: string
+  turmaId: number | null
+  isActive: boolean
+}
