@@ -56,9 +56,14 @@ export function ContatosList() {
     <div className="container" style={{ padding: '24px' }}>
       <div style={{ marginBottom: '24px' }}>
         <h1>👥 Contatos</h1>
-        <button className="btn btn-primary" onClick={() => navigate('/contatos/new')}>
-          ➕ Novo Contato
-        </button>
+        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+          <button className="btn btn-primary" onClick={() => navigate('/contatos/new')}>
+            ➕ Novo Contato
+          </button>
+          <button className="btn btn-secondary" onClick={() => navigate('/contatos/import-excel')}>
+            ⬇️ Importar Excel
+          </button>
+        </div>
       </div>
 
       <Card style={{ marginBottom: '24px' }}>
@@ -121,7 +126,12 @@ export function ContatosList() {
           icon="👤"
           title="Nenhum contato encontrado"
           text="Crie seu primeiro contato para começar"
-          action={<button className="btn btn-primary" onClick={() => navigate('/contatos/new')}>Criar Contato</button>}
+          action={
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center' }}>
+              <button className="btn btn-primary" onClick={() => navigate('/contatos/new')}>Criar Contato</button>
+              <button className="btn btn-secondary" onClick={() => navigate('/contatos/import-excel')}>Importar Excel</button>
+            </div>
+          }
         />
       ) : (
         <Card>

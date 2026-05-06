@@ -10,6 +10,7 @@ import { TurmasList } from './pages/TurmasList'
 import { TurmaForm } from './pages/TurmaForm'
 import { ContatosList } from './pages/ContatosList'
 import { ContatoForm } from './pages/ContatoForm'
+import { ContatosImportExcel } from './pages/ContatosImportExcel'
 import { BulkMessages } from './pages/BulkMessages'
 import { ProfilePage } from './pages/ProfilePage'
 import { ScheduleRulesList } from './pages/ScheduleRulesList'
@@ -233,6 +234,7 @@ export default function App() {
         <Route path="/turmas/:id/edit" element={<TurmaForm />} />
         <Route path="/contatos" element={<ContatosList />} />
         <Route path="/contatos/new" element={<ContatoForm />} />
+        <Route path="/contatos/import-excel" element={<ContatosImportExcel />} />
         <Route path="/contatos/:id/edit" element={<ContatoForm />} />
         <Route path="/rules" element={!isAdmin && userTitle === 'Operador' ? <Navigate to="/" replace /> : <ScheduleRulesList />} />
         <Route path="/rules/new" element={!isAdmin && userTitle === 'Operador' ? <Navigate to="/" replace /> : <ScheduleRuleForm />} />

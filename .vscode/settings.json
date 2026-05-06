@@ -7,6 +7,7 @@
         "dotnet build": true,
         "npm run build": true,
         "dotnet ef": true,
-        "Get-Process": true
+        "Get-Process": true,
+        "dotnet add": true
     }
 }

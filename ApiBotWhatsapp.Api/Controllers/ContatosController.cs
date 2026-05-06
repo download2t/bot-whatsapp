@@ -2,6 +2,7 @@ using ApiBotWhatsapp.Api.Data;
 using ApiBotWhatsapp.Api.Dtos;
 using ApiBotWhatsapp.Api.Models;
 using ApiBotWhatsapp.Api.Utils;
+using ClosedXML.Excel;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Xml.Linq;
@@ -242,5 +243,173 @@ public class ContatosController(AppDbContext dbContext) : ControllerBase
         }
 
         return null;
+    }
+
+    [HttpGet("import-excel/template")]
+    public ActionResult DownloadExcelTemplate()
+    {
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.AddWorksheet("Contatos");
+
+        worksheet.Cell(1, 1).Value = "Nome";
+        worksheet.Cell(1, 2).Value = "Telefone";
+        worksheet.Cell(2, 1).Value = "João Silva";
+        // Ensure phone numbers are stored/displayed as text to avoid Excel auto-formatting
+        var phoneCell = worksheet.Cell(2, 2);
+        // Use non-generic SetValue overload (older ClosedXML versions)
+        phoneCell.SetValue("5545999999999");
+
+        // Set entire phone column to Text format (NumberFormat "@") so user edits keep correct display
+        var phoneColumn = worksheet.Column(2);
+        phoneColumn.Style.NumberFormat.Format = "@";
+        phoneColumn.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Left;
+
+        worksheet.Range(1, 1, 1, 2).Style.Font.Bold = true;
+        worksheet.Columns().AdjustToContents();
+
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        return File(stream.ToArray(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "modelo-contatos.xlsx");
+    }
+
+    [HttpPost("import-excel")]
+    [Consumes("multipart/form-data")]
+    public async Task<ActionResult> ImportExcel([FromForm] IFormFile file, [FromForm] string turmaName, CancellationToken cancellationToken)
+    {
+        var companyId = GetCurrentCompanyId();
+        if (companyId is null) return Unauthorized();
+
+        if (string.IsNullOrWhiteSpace(turmaName))
+        {
+            return BadRequest("TurmaName is required.");
+        }
+
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest("Excel file is required.");
+        }
+
+        try
+        {
+            await using var stream = file.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+            var worksheet = workbook.Worksheets.FirstOrDefault();
+
+            if (worksheet is null || worksheet.LastRowUsed() is null)
+            {
+                return BadRequest("Excel file has no data.");
+            }
+
+            var headerRow = worksheet.Row(1);
+            var headerMap = BuildHeaderMap(headerRow);
+            var nameColumn = ResolveColumn(headerMap, "nome", "name", "contato", "fullName");
+            var phoneColumn = ResolveColumn(headerMap, "telefone", "phone", "phoneNumber", "number", "numero");
+
+            if (nameColumn is null || phoneColumn is null)
+            {
+                return BadRequest("Excel template must contain 'Nome' and 'Telefone' columns.");
+            }
+
+            var contacts = new List<Contato>();
+            for (var row = 2; row <= worksheet.LastRowUsed()!.RowNumber(); row++)
+            {
+                var currentRow = worksheet.Row(row);
+                var name = currentRow.Cell(nameColumn.Value).GetString().Trim();
+                var phone = currentRow.Cell(phoneColumn.Value).GetString().Trim();
+
+                if (string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(phone))
+                {
+                    continue;
+                }
+
+                var normalizedPhone = PhoneNumberUtils.Normalize(phone);
+                if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(normalizedPhone))
+                {
+                    continue;
+                }
+
+                contacts.Add(new Contato
+                {
+                    CompanyId = companyId.Value,
+                    Name = name,
+                    PhoneNumber = normalizedPhone,
+                    IsActive = true,
+                    CreatedAtUtc = DateTime.UtcNow
+                });
+            }
+
+            if (contacts.Count == 0)
+            {
+                return BadRequest("No valid contacts found in the Excel file.");
+            }
+
+            await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+
+            var turma = new Turma
+            {
+                CompanyId = companyId.Value,
+                Name = turmaName.Trim(),
+                IsActive = true,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+
+            dbContext.Turmas.Add(turma);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            foreach (var contact in contacts)
+            {
+                contact.TurmaId = turma.Id;
+            }
+
+            dbContext.Contatos.AddRange(contacts);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            return Ok(new
+            {
+                turmaId = turma.Id,
+                turmaName = turma.Name,
+                importedContacts = contacts.Count
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest($"Invalid Excel file: {ex.Message}");
+        }
+    }
+
+    private static Dictionary<string, int> BuildHeaderMap(IXLRow headerRow)
+    {
+        var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var cell in headerRow.CellsUsed())
+        {
+            var value = NormalizeHeader(cell.GetString());
+            if (!string.IsNullOrWhiteSpace(value) && !headers.ContainsKey(value))
+            {
+                headers[value] = cell.Address.ColumnNumber;
+            }
+        }
+
+        return headers;
+    }
+
+    private static int? ResolveColumn(Dictionary<string, int> headerMap, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            var key = NormalizeHeader(name);
+            if (headerMap.TryGetValue(key, out var column))
+            {
+                return column;
+            }
+        }
+
+        return null;
+    }
+
+    private static string NormalizeHeader(string value)
+    {
+        var normalized = value.Trim().ToLowerInvariant();
+        return new string(normalized.Where(char.IsLetterOrDigit).ToArray());
     }
 }
