@@ -1,5 +1,6 @@
 using ApiBotWhatsapp.Api.Data;
 using ApiBotWhatsapp.Api.Dtos;
+using ApiBotWhatsapp.Api.Models;
 using ApiBotWhatsapp.Api.Services;
 using ApiBotWhatsapp.Api.Utils;
 using Microsoft.AspNetCore.Mvc;
