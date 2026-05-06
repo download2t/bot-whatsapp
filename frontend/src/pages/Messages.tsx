@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { apiFetch, getApiBase } from '../lib/api'
 import type { MessageLog, PagedMessageLog, WhatsAppFilterOptions } from '../types'
 import './Messages.css'
 
 export function Messages() {
+  const navigate = useNavigate()
   const [messages, setMessages] = useState<MessageLog[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -252,6 +254,9 @@ export function Messages() {
       </div>
 
       <div className="message-actions">
+        <button className="btn btn-primary" onClick={() => navigate('/messages/bulk')}>
+          Enviar mensagens em lote
+        </button>
         <button className="btn btn-secondary" onClick={() => void downloadCsv()}>
           Exportar CSV
         </button>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
 import type { CompanyOption, WhatsAppConnectionItem, WhatsAppConnectionStatus } from '../types'
 import './Navigation.css'
@@ -28,23 +28,23 @@ export function Navigation({
   onSwitchCompany,
 }: NavigationProps) {
   const navigate = useNavigate()
-  const location = useLocation()
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false)
   const [isNavOpen, setIsNavOpen] = useState(false)
   const [status, setStatus] = useState<WhatsAppConnectionStatus | null>(null)
   const [connections, setConnections] = useState<WhatsAppConnectionItem[]>([])
   const [switchingCompany, setSwitchingCompany] = useState(false)
   const [companyError, setCompanyError] = useState('')
   const profileMenuRef = useRef<HTMLLIElement | null>(null)
+  const adminMenuRef = useRef<HTMLLIElement | null>(null)
   const userInitial = username.trim().charAt(0).toUpperCase() || 'U'
   const connectedConnections = useMemo(() => connections.filter((item) => item.isConnected), [connections])
 
   const closeMenus = () => {
     setIsMenuOpen(false)
+    setIsAdminMenuOpen(false)
     setIsNavOpen(false)
   }
-
-  const isActive = (path: string) => location.pathname === path ? 'active' : ''
 
   const connectionLabel = useMemo(() => {
     if (!status) return 'Status indisponivel'
@@ -104,8 +104,16 @@ export function Navigation({
 
   useEffect(() => {
     const onClickOutside = (event: MouseEvent) => {
-      if (!profileMenuRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node
+      const clickedProfile = profileMenuRef.current?.contains(target)
+      const clickedAdmin = adminMenuRef.current?.contains(target)
+
+      if (!clickedProfile) {
         setIsMenuOpen(false)
+      }
+
+      if (!clickedAdmin) {
+        setIsAdminMenuOpen(false)
       }
     }
 
@@ -150,59 +158,31 @@ export function Navigation({
         </button>
 
         <ul className={`nav-menu ${isNavOpen ? 'open' : ''}`}>
-          <li className="nav-item">
-            <Link to="/" className={`nav-link ${isActive('/')}`} onClick={closeMenus}>
-              Dashboard
-            </Link>
-          </li>
-          <li className="nav-item">
-            <Link to="/messages" className={`nav-link ${isActive('/messages')}`} onClick={closeMenus}>
-              Mensagens
-            </Link>
-          </li>
-          <li className="nav-item">
-            <Link to="/messages/bulk" className={`nav-link ${isActive('/messages/bulk')}`} onClick={closeMenus}>
-              Enviar Mensagens (Lote)
-            </Link>
-          </li>
           {(isAdmin || userTitle === 'Gestor') && (
-            <>
-              <li className="nav-item">
-                <Link to="/rules" className={`nav-link ${isActive('/rules')}`} onClick={closeMenus}>
-                  Regras
-                </Link>
-              </li>
-              <li className="nav-item">
-                <Link to="/whitelist" className={`nav-link ${isActive('/whitelist')}`} onClick={closeMenus}>
-                  Whitelist
-                </Link>
-              </li>
-              <li className="nav-item">
-                <Link to="/turmas" className={`nav-link ${isActive('/turmas')}`} onClick={closeMenus}>
-                  Turmas
-                </Link>
-              </li>
-              <li className="nav-item">
-                <Link to="/contatos" className={`nav-link ${isActive('/contatos')}`} onClick={closeMenus}>
-                  Contatos
-                </Link>
-              </li>
-              <li className="nav-item">
-                <Link to="/users" className={`nav-link ${isActive('/users')}`} onClick={closeMenus}>
-                  Usuários
-                </Link>
-              </li>
-            </>
-          )}
-          {isAdmin && (
-            <li className="nav-item">
-              <Link to="/companies" className={`nav-link ${isActive('/companies')}`} onClick={closeMenus}>
-                Empresas
-              </Link>
+            <li className="nav-item admin-root" ref={adminMenuRef}>
+              <button className="admin-trigger" onClick={() => setIsAdminMenuOpen((value) => !value)}>
+                <span className="menu-dot admin-dot" aria-hidden="true" />
+                <span>Administração</span>
+                <span className="profile-caret">▾</span>
+              </button>
+
+              {isAdminMenuOpen && (
+                <div className="admin-menu profile-menu">
+                  <button className="menu-item" onClick={() => { navigate('/rules'); closeMenus() }}>Regras</button>
+                  <button className="menu-item" onClick={() => { navigate('/whitelist'); closeMenus() }}>White List</button>
+                  <button className="menu-item" onClick={() => { navigate('/users'); closeMenus() }}>Usuários</button>
+                  <button className="menu-item" onClick={() => { navigate('/turmas'); closeMenus() }}>Turmas</button>
+                  <button className="menu-item" onClick={() => { navigate('/contatos'); closeMenus() }}>Contatos</button>
+                  <button className="menu-item" onClick={() => { navigate('/messages'); closeMenus() }}>Mensagens</button>
+                  {isAdmin && <button className="menu-item" onClick={() => { navigate('/companies'); closeMenus() }}>Empresas</button>}
+                </div>
+              )}
             </li>
           )}
           <li className="nav-item profile-root" ref={profileMenuRef}>
             <button className="profile-trigger" onClick={() => setIsMenuOpen((value) => !value)}>
+              <span className="menu-dot profile-dot" aria-hidden="true" />
+              <span className="profile-name">{username}</span>
               <span className="profile-caret">▾</span>
               <span className="profile-avatar">{userInitial}</span>
             </button>

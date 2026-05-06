@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using ApiBotWhatsapp.Api.Utils;
 
 namespace ApiBotWhatsapp.Api.Services;
 
@@ -7,10 +8,28 @@ public class WhatsAppMessageSender(IConfiguration configuration, IHttpClientFact
 
     public async Task<(bool Success, string Status)> SendMessageAsync(string phoneNumber, string message, bool markAsUnread, string? sourceWhatsAppNumber, CancellationToken cancellationToken)
     {
+        var candidates = PhoneNumberUtils.GetEquivalentBrazilianNumbers(phoneNumber);
+        if (candidates.Length == 0)
+        {
+            return (false, "Phone number is invalid.");
+        }
+
         var bridgeBaseUrl = configuration["WhatsApp:BridgeBaseUrl"];
         if (!string.IsNullOrWhiteSpace(bridgeBaseUrl))
         {
-            return await bridgeClient.SendMessageAsync(phoneNumber, message, markAsUnread, sourceWhatsAppNumber, cancellationToken);
+            foreach (var candidate in candidates)
+            {
+                var result = await bridgeClient.SendMessageAsync(candidate, message, markAsUnread, sourceWhatsAppNumber, cancellationToken);
+                if (result.Success)
+                {
+                    return result;
+                }
+
+                if (candidate == candidates[^1])
+                {
+                    return result;
+                }
+            }
         }
 
         var outgoingWebhookUrl = configuration["WhatsApp:OutgoingWebhookUrl"];
@@ -19,26 +38,41 @@ public class WhatsAppMessageSender(IConfiguration configuration, IHttpClientFact
             return (true, "Simulated send (configure WhatsApp:OutgoingWebhookUrl for real dispatch).");
         }
 
-        var payload = new
+        foreach (var candidate in candidates)
         {
-            phoneNumber,
-            message,
-            markAsUnread,
-            sourceWhatsAppNumber
-        };
+            var payload = new
+            {
+                phoneNumber = candidate,
+                message,
+                markAsUnread,
+                sourceWhatsAppNumber
+            };
 
-        try
-        {
-            var client = httpClientFactory.CreateClient();
-            var response = await client.PostAsJsonAsync(outgoingWebhookUrl, payload, cancellationToken);
+            try
+            {
+                var client = httpClientFactory.CreateClient();
+                var response = await client.PostAsJsonAsync(outgoingWebhookUrl, payload, cancellationToken);
 
-            return response.IsSuccessStatusCode
-                ? (true, "Sent to WhatsApp provider.")
-                : (false, $"Provider returned {(int)response.StatusCode}.");
+                if (response.IsSuccessStatusCode)
+                {
+                    return (true, "Sent to WhatsApp provider.");
+                }
+
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (candidate == candidates[^1])
+                {
+                    return (false, string.IsNullOrWhiteSpace(body) ? $"Provider returned {(int)response.StatusCode}." : body);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (candidate == candidates[^1])
+                {
+                    return (false, $"Provider call failed: {ex.Message}");
+                }
+            }
         }
-        catch (Exception ex)
-        {
-            return (false, $"Provider call failed: {ex.Message}");
-        }
+
+        return (false, "Unable to send message using available phone variants.");
     }
 }
