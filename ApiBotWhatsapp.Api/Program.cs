@@ -83,7 +83,7 @@ using (var scope = app.Services.CreateScope())
     await EnsureUserColumnsAsync(dbContext);
     await EnsureContatosAndTurmasTablesAsync(dbContext);
     await SeedData.InitializeAsync(dbContext);
-    await EnsureTenantDataConsistencyAsync(dbContext);
+    await EnsureSingleTenantDataAsync(dbContext);
 }
 
 if (app.Environment.IsDevelopment())
@@ -199,18 +199,44 @@ static async Task<HashSet<string>> GetTableColumnsAsync(DbConnection connection,
     return columns;
 }
 
-static async Task EnsureTenantDataConsistencyAsync(AppDbContext dbContext)
+static async Task EnsureSingleTenantDataAsync(AppDbContext dbContext)
 {
-    var company = await dbContext.Companies.FirstOrDefaultAsync(c => c.UniqueCode == SeedData.DefaultCompanyCode);
-    if (company is null)
+    var primaryCompany = await dbContext.Companies.FirstOrDefaultAsync(c => c.UniqueCode == SeedData.DefaultCompanyCode);
+    if (primaryCompany is null)
     {
-        return;
+        primaryCompany = new Company
+        {
+            Name = "Empresa Única",
+            UniqueCode = SeedData.DefaultCompanyCode,
+            CreatedAtUtc = DateTime.UtcNow
+        };
+
+        dbContext.Companies.Add(primaryCompany);
+        await dbContext.SaveChangesAsync();
     }
 
-    await dbContext.Database.ExecuteSqlInterpolatedAsync($"UPDATE Users SET CompanyId = {company.Id} WHERE CompanyId IS NULL OR CompanyId <= 0;");
-    await dbContext.Database.ExecuteSqlInterpolatedAsync($"UPDATE ScheduleRules SET CompanyId = {company.Id} WHERE CompanyId IS NULL OR CompanyId <= 0;");
-    await dbContext.Database.ExecuteSqlInterpolatedAsync($"UPDATE WhitelistNumbers SET CompanyId = {company.Id} WHERE CompanyId IS NULL OR CompanyId <= 0;");
-    await dbContext.Database.ExecuteSqlInterpolatedAsync($"UPDATE MessageLogs SET CompanyId = {company.Id} WHERE CompanyId IS NULL OR CompanyId <= 0;");
+    if (!string.Equals(primaryCompany.UniqueCode, SeedData.DefaultCompanyCode, StringComparison.Ordinal))
+    {
+        primaryCompany.UniqueCode = SeedData.DefaultCompanyCode;
+        await dbContext.SaveChangesAsync();
+    }
+
+    var primaryCompanyId = primaryCompany.Id;
+
+    await dbContext.Database.ExecuteSqlInterpolatedAsync($"UPDATE Users SET CompanyId = {primaryCompanyId};");
+    await dbContext.Database.ExecuteSqlInterpolatedAsync($"UPDATE ScheduleRules SET CompanyId = {primaryCompanyId};");
+    await dbContext.Database.ExecuteSqlInterpolatedAsync($"UPDATE WhitelistNumbers SET CompanyId = {primaryCompanyId};");
+    await dbContext.Database.ExecuteSqlInterpolatedAsync($"UPDATE MessageLogs SET CompanyId = {primaryCompanyId};");
+    await dbContext.Database.ExecuteSqlInterpolatedAsync($"UPDATE Turmas SET CompanyId = {primaryCompanyId};");
+    await dbContext.Database.ExecuteSqlInterpolatedAsync($"UPDATE Contatos SET CompanyId = {primaryCompanyId};");
+
+    await dbContext.Database.ExecuteSqlRawAsync("DELETE FROM UserCompanies;");
+    await dbContext.Database.ExecuteSqlInterpolatedAsync($@"
+INSERT OR IGNORE INTO UserCompanies (UserId, CompanyId, AssignedAtUtc)
+SELECT Id, {primaryCompanyId}, COALESCE(CreatedAtUtc, datetime('now'))
+FROM Users;");
+
+    await dbContext.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM Companies WHERE Id <> {primaryCompanyId};");
 }
 
 static async Task EnsureScheduleRuleColumnsAsync(AppDbContext dbContext)

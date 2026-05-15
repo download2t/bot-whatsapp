@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
-import type { CompanyOption, WhatsAppConnectionItem, WhatsAppConnectionStatus } from '../types'
+import type { WhatsAppConnectionItem, WhatsAppConnectionStatus } from '../types'
 import './Navigation.css'
 
 type NavigationProps = {
@@ -9,11 +9,6 @@ type NavigationProps = {
   isAdmin: boolean
   userTitle: string | null
   onLogout: () => void
-  activeCompanyId: number | null
-  activeCompanyName: string | null
-  activeCompanyCode: string | null
-  companies: CompanyOption[]
-  onSwitchCompany: (companyId: number) => Promise<void>
 }
 
 export function Navigation({
@@ -21,11 +16,6 @@ export function Navigation({
   isAdmin,
   userTitle,
   onLogout,
-  activeCompanyId,
-  activeCompanyName,
-  activeCompanyCode,
-  companies,
-  onSwitchCompany,
 }: NavigationProps) {
   const navigate = useNavigate()
   const [isMenuOpen, setIsMenuOpen] = useState(false)
@@ -33,8 +23,6 @@ export function Navigation({
   const [isNavOpen, setIsNavOpen] = useState(false)
   const [status, setStatus] = useState<WhatsAppConnectionStatus | null>(null)
   const [connections, setConnections] = useState<WhatsAppConnectionItem[]>([])
-  const [switchingCompany, setSwitchingCompany] = useState(false)
-  const [companyError, setCompanyError] = useState('')
   const profileMenuRef = useRef<HTMLLIElement | null>(null)
   const adminMenuRef = useRef<HTMLLIElement | null>(null)
   const userInitial = username.trim().charAt(0).toUpperCase() || 'U'
@@ -125,25 +113,6 @@ export function Navigation({
     window.open('http://localhost:5207/swagger', '_blank', 'noopener,noreferrer')
   }
 
-  const handleCompanyChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
-    const selectedCompanyId = Number(event.target.value)
-    if (!selectedCompanyId || selectedCompanyId === activeCompanyId) {
-      return
-    }
-
-    setSwitchingCompany(true)
-    setCompanyError('')
-    try {
-      await onSwitchCompany(selectedCompanyId)
-      closeMenus()
-      window.location.reload()
-    } catch (error) {
-      setCompanyError(error instanceof Error ? error.message : 'Falha ao trocar empresa.')
-    } finally {
-      setSwitchingCompany(false)
-    }
-  }
-
   return (
     <nav className="navbar">
       <div className="navbar-container">
@@ -174,7 +143,6 @@ export function Navigation({
                   <button className="menu-item" onClick={() => { navigate('/turmas'); closeMenus() }}>Turmas</button>
                   <button className="menu-item" onClick={() => { navigate('/contatos'); closeMenus() }}>Contatos</button>
                   <button className="menu-item" onClick={() => { navigate('/messages'); closeMenus() }}>Mensagens</button>
-                  {isAdmin && <button className="menu-item" onClick={() => { navigate('/companies'); closeMenus() }}>Empresas</button>}
                 </div>
               )}
             </li>
@@ -191,29 +159,6 @@ export function Navigation({
               <div className="profile-menu">
                 <p className="menu-caption">Conectado como</p>
                 <p className="menu-username">{username}</p>
-                <p className="menu-caption">Empresa atual</p>
-                <p className="menu-company">{activeCompanyName ?? 'Nenhuma selecionada'}</p>
-                {activeCompanyCode && <p className="menu-company-code">{activeCompanyCode}</p>}
-
-                {companies.length > 1 && (
-                  <>
-                    <label className="menu-caption" htmlFor="companySwitcher">Trocar empresa</label>
-                    <select
-                      id="companySwitcher"
-                      className="company-switcher"
-                      value={activeCompanyId ?? ''}
-                      onChange={(event) => { void handleCompanyChange(event) }}
-                      disabled={switchingCompany}
-                    >
-                      {companies.map((company) => (
-                        <option key={company.companyId} value={company.companyId}>
-                          {company.companyName}
-                        </option>
-                      ))}
-                    </select>
-                    {companyError && <p className="menu-feedback company-feedback">{companyError}</p>}
-                  </>
-                )}
                 <hr />
 
                 <button className="menu-item" onClick={() => { navigate('/profile'); closeMenus() }}>Perfil</button>
