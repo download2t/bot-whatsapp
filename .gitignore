@@ -20,6 +20,7 @@ whatsapp-bridge/.env
 # Local bridge state and dependencies
 whatsapp-bridge/.wwebjs_auth/
 whatsapp-bridge/.wwebjs_cache/
+whatsapp-bridge/.sessions.json
 whatsapp-bridge/node_modules/
 
 # Frontend dependencies

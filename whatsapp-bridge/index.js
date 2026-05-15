@@ -4,8 +4,15 @@ import cors from 'cors';
 import axios from 'axios';
 import qrcode from 'qrcode';
 import whatsappWebJs from 'whatsapp-web.js';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const { Client } = whatsappWebJs;
+const { Client, LocalAuth } = whatsappWebJs;
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const SESSIONS_STATE_FILE = path.join(__dirname, '.sessions.json');
 
 const app = express();
 app.use(cors());
@@ -18,8 +25,57 @@ const backendCompanyCode = process.env.BACKEND_COMPANY_CODE ?? 'EMPRESA-TESTE';
 
 let apiAvailable = false;
 let sessionCounter = 1;
+let persistSessionsQueue = Promise.resolve();
 
 const sessions = new Map();
+
+async function loadPersistedSessionIds() {
+  try {
+    const raw = await fs.readFile(SESSIONS_STATE_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+
+    if (!Array.isArray(parsed?.sessions)) {
+      return [];
+    }
+
+    const valid = parsed.sessions
+      .map((item) => String(item ?? '').trim())
+      .filter((item) => item.length > 0);
+
+    return Array.from(new Set(valid));
+  } catch {
+    return [];
+  }
+}
+
+async function savePersistedSessionIds() {
+  const payload = {
+    sessions: Array.from(sessions.keys()).sort(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  await fs.writeFile(SESSIONS_STATE_FILE, JSON.stringify(payload, null, 2), 'utf8');
+}
+
+function queuePersistedSessionIds() {
+  persistSessionsQueue = persistSessionsQueue
+    .catch(() => undefined)
+    .then(() => savePersistedSessionIds());
+
+  return persistSessionsQueue;
+}
+
+function updateSessionCounterFromId(sessionId) {
+  const match = /^session-(\d+)$/i.exec(sessionId);
+  if (!match) {
+    return;
+  }
+
+  const current = Number(match[1]);
+  if (Number.isFinite(current)) {
+    sessionCounter = Math.max(sessionCounter, current + 1);
+  }
+}
 
 function normalizePhone(raw) {
   return String(raw ?? '').replace(/\D/g, '');
@@ -69,14 +125,32 @@ function getSessionOrDefault(id) {
   return sessions.get(id) ?? null;
 }
 
+function normalizeSessionId(id) {
+  if (!id || id === 'default') {
+    return 'default';
+  }
+
+  return String(id).trim();
+}
+
+function getAuthSessionDir(sessionId) {
+  return path.join(__dirname, '.wwebjs_auth', `session-${sessionId}`);
+}
+
 function ensureSession(id) {
-  const sessionId = id || 'default';
+  const sessionId = normalizeSessionId(id);
   const existing = sessions.get(sessionId);
   if (existing) {
     return existing;
   }
 
+  updateSessionCounterFromId(sessionId);
+
   const client = new Client({
+    authStrategy: new LocalAuth({
+      clientId: sessionId,
+      dataPath: path.join(__dirname, '.wwebjs_auth'),
+    }),
     puppeteer: {
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
@@ -181,7 +255,68 @@ function ensureSession(id) {
   });
 
   sessions.set(sessionId, session);
+  void queuePersistedSessionIds().catch((error) => {
+    console.error('Failed to persist session list:', error?.message ?? error);
+  });
   return session;
+}
+
+async function restartSessionById(id) {
+  const sessionId = normalizeSessionId(id);
+  const previous = sessions.get(sessionId);
+  if (!previous) {
+    return null;
+  }
+
+  previous.manualDisconnect = true;
+  try {
+    await previous.client.destroy();
+  } catch {
+    // Ignore client destroy failures during restart.
+  }
+
+  sessions.delete(sessionId);
+  const recreated = ensureSession(sessionId);
+  await initializeSessionIfNeeded(recreated);
+  return recreated;
+}
+
+async function logoutDefinitiveById(id) {
+  const sessionId = normalizeSessionId(id);
+  const session = sessions.get(sessionId);
+  if (!session) {
+    return null;
+  }
+
+  session.manualDisconnect = true;
+  try {
+    await session.client.logout();
+  } catch {
+    // Some states may fail logout; continue with destroy + cleanup.
+  }
+
+  try {
+    await session.client.destroy();
+  } catch {
+    // Ignore destroy failures while forcing definitive logout.
+  }
+
+  sessions.delete(sessionId);
+
+  try {
+    await fs.rm(getAuthSessionDir(sessionId), { recursive: true, force: true });
+  } catch {
+    // Best effort cleanup of local auth artifacts.
+  }
+
+  try {
+    await queuePersistedSessionIds();
+    await savePersistedSessionIds();
+  } catch {
+    // Keep endpoint resilient even if metadata persistence fails.
+  }
+
+  return { id: sessionId };
 }
 
 async function initializeSessionIfNeeded(session) {
@@ -322,6 +457,72 @@ app.post('/session/:id/disconnect', async (req, res) => {
   }
 });
 
+app.post('/session/:id/restart', async (req, res) => {
+  const sessionId = normalizeSessionId(req.params.id);
+
+  try {
+    const restarted = await restartSessionById(sessionId);
+    if (!restarted) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    return res.status(202).json({
+      ok: true,
+      id: restarted.id,
+      action: 'restart',
+      preservedAuth: true,
+      status: restarted.status,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error?.message ?? 'Unable to restart session' });
+  }
+});
+
+app.post('/session/restart-all', async (_req, res) => {
+  const ids = Array.from(sessions.keys());
+  const restarted = [];
+  const failed = [];
+
+  for (const id of ids) {
+    try {
+      const item = await restartSessionById(id);
+      if (item) {
+        restarted.push(id);
+      }
+    } catch (error) {
+      failed.push({ id, error: error?.message ?? 'Unable to restart session' });
+    }
+  }
+
+  return res.status(202).json({
+    ok: failed.length === 0,
+    action: 'restart-all',
+    total: ids.length,
+    restarted,
+    failed,
+  });
+});
+
+app.post('/session/:id/logout-definitivo', async (req, res) => {
+  const sessionId = normalizeSessionId(req.params.id);
+
+  try {
+    const removed = await logoutDefinitiveById(sessionId);
+    if (!removed) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    return res.json({
+      ok: true,
+      id: removed.id,
+      action: 'logout-definitivo',
+      removedFromPersistence: true,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error?.message ?? 'Unable to logout definitively' });
+  }
+});
+
 app.post('/session/:id/pairing-code', async (req, res) => {
   const session = getSessionOrDefault(req.params.id);
   if (!session) {
@@ -438,7 +639,28 @@ app.listen(port, () => {
   console.log(`WhatsApp bridge running on http://localhost:${port}`);
   console.log(`Backend webhook target: ${backendWebhookUrl}`);
   void refreshApiAvailability();
-  console.log('Persistent WhatsApp sessions are disabled. Each start begins with a clean in-memory state.');
+  console.log(`Session state file: ${SESSIONS_STATE_FILE}`);
+});
+
+async function restorePersistedSessions() {
+  const restoredIds = await loadPersistedSessionIds();
+  if (restoredIds.length === 0) {
+    return;
+  }
+
+  console.log(`Restoring ${restoredIds.length} persisted session(s)...`);
+  for (const id of restoredIds) {
+    const session = ensureSession(id);
+    // Keep startup resilient: restore all sessions even if one fails.
+    await initializeSessionIfNeeded(session).catch((error) => {
+      session.lastError = error?.message ?? 'Unable to restore session';
+      session.status = 'error';
+    });
+  }
+}
+
+void restorePersistedSessions().catch((error) => {
+  console.error('Failed to restore persisted sessions:', error?.message ?? error);
 });
 
 process.on('SIGINT', async () => {
