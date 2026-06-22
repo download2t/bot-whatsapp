@@ -22,9 +22,12 @@ public class WhatsAppController(WhatsAppBridgeClient bridgeClient) : ControllerB
         return status is null ? NotFound("WhatsApp bridge is not configured.") : Ok(status);
     }
 
-    [HttpGet("qr")]
-    public async Task<ActionResult<WhatsAppQrResponse>> GetQr([FromQuery] string? sessionId, CancellationToken cancellationToken)
+[HttpGet("qr")]
+    public async Task<ActionResult<WhatsAppQrResponse>> GetQr([FromQuery] string sessionId, CancellationToken cancellationToken)
     {
+        // Se o sessionId for nulo ou vazio, a rota falha
+        if (string.IsNullOrEmpty(sessionId)) return BadRequest("sessionId is required");
+        
         var qr = await bridgeClient.GetQrAsync(sessionId, cancellationToken);
         return qr is null ? NotFound("QR not available.") : Ok(new WhatsAppQrResponse(qr));
     }
