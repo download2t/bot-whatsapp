@@ -47,20 +47,32 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
         {
             var brasiliaTime = GetBrasiliaTimeFromUtc(messageTimestampUtc, configuration["WhatsApp:TimeZoneId"]);
 
-            var incomingLog = new MessageLog
+            // 1. Define a direção e o status baseado no que veio do Node.js
+            var direction = !string.IsNullOrWhiteSpace(request.Direction) ? request.Direction : "Incoming";
+            var status = direction == "Outgoing" ? "Sent" : "Received";
+
+            var incomingLog = new ApiBotWhatsapp.Api.Models.MessageLog
             {
                 CompanyId = company.Id,
                 WhatsAppNumber = normalizedWhatsApp,
-                Direction = "Incoming",
+                Direction = direction,
                 PhoneNumber = normalizedPhone,
+                ContactName = request.ContactName, // <--- NOME GRAVADO AQUI
                 Content = request.Message,
                 IsAutomatic = false,
-                Status = "Received",
+                Status = status,
                 TimestampUtc = brasiliaTime
             };
 
             dbContext.MessageLogs.Add(incomingLog);
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            // 2. TRAVA DE SEGURANÇA: Se a mensagem foi enviada por nós (Outgoing), 
+            // paramos o processo aqui para o Bot não responder a si próprio.
+            if (direction == "Outgoing")
+            {
+                return new WhatsAppWebhookResponse(false, "Outgoing message logged. Auto reply skipped.", null);
+            }
 
             var equivalentPhoneNumbers = PhoneNumberUtils.GetEquivalentBrazilianNumbers(normalizedPhone);
             var isInWhitelist = await dbContext.WhitelistNumbers
@@ -116,12 +128,13 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
 
             var dispatchResult = await messageSender.SendMessageAsync(normalizedPhone, rule.Message, true, normalizedWhatsApp, cancellationToken);
 
-            var outgoingLog = new MessageLog
+            var outgoingLog = new ApiBotWhatsapp.Api.Models.MessageLog
             {
                 CompanyId = company.Id,
                 WhatsAppNumber = normalizedWhatsApp,
                 Direction = "Outgoing",
                 PhoneNumber = normalizedPhone,
+                ContactName = request.ContactName, // <--- NOME MANTIDO TAMBÉM NA RESPOSTA AUTOMÁTICA
                 Content = rule.Message,
                 IsAutomatic = true,
                 Status = dispatchResult.Status,

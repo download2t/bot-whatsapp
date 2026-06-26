@@ -1,319 +1,287 @@
-import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { apiFetch, getApiBase } from '../lib/api'
-import type { MessageLog, PagedMessageLog, WhatsAppFilterOptions } from '../types'
-import './Messages.css'
+import { useEffect, useState, useMemo, useRef } from "react";
+import { useNavigate } from "react-router-dom";
+import { apiFetch } from "../lib/api";
+import type { MessageLog } from "../types";
+import "./Messages.css";
 
 export function Messages() {
-  const navigate = useNavigate()
-  const [messages, setMessages] = useState<MessageLog[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [filter, setFilter] = useState<'all' | 'incoming' | 'outgoing'>('all')
-  const [whatsAppOptions, setWhatsAppOptions] = useState<string[]>([])
-  const [selectedWhatsAppNumber, setSelectedWhatsAppNumber] = useState('')
-  
-  // Inputs temporários (do form)
-  const [phoneNumber, setPhoneNumber] = useState('')
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
-  
-  // Filtros aplicados (para busca efetiva)
-  const [appliedPhoneNumber, setAppliedPhoneNumber] = useState('')
-  const [appliedStartDate, setAppliedStartDate] = useState('')
-  const [appliedEndDate, setAppliedEndDate] = useState('')
-  const [sortBy, setSortBy] = useState<'timestamp' | 'phone' | 'direction'>('timestamp')
-  const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc')
-  const [page, setPage] = useState(1)
-  const [pageSize] = useState(20)
-  const [totalCount, setTotalCount] = useState(0)
+  const navigate = useNavigate();
+  const [messages, setMessages] = useState<MessageLog[]>([]);
+  const [whatsAppOptions, setWhatsAppOptions] = useState<string[]>([]);
+  const [activePhone, setActivePhone] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [whatsAppFilter, setWhatsAppFilter] = useState("all");
+  const [newMessage, setNewMessage] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
-
-  useEffect(() => {
-    const loadWhatsAppOptions = async () => {
-      try {
-        const options = await apiFetch<WhatsAppFilterOptions>('/api/messages/whatsapp-options')
-        const numbers = options.numbers || []
-        setWhatsAppOptions(numbers)
-      } catch {
-        // optional metadata endpoint
-      }
-    }
-
-    void loadWhatsAppOptions()
-  }, [])
-
-  useEffect(() => {
-    if (page > totalPages) {
-      setPage(totalPages)
-    }
-  }, [page, totalPages])
-
-  const handleFilter = () => {
-    setAppliedPhoneNumber(phoneNumber)
-    setAppliedStartDate(startDate)
-    setAppliedEndDate(endDate)
-    setPage(1)
-  }
-
-  const clearFields = () => {
-    setPhoneNumber('')
-    setStartDate('')
-    setEndDate('')
-  }
-
-  useEffect(() => {
-    const loadMessages = async () => {
-      try {
-        setLoading(true)
-        const params = new URLSearchParams()
-        params.set('page', String(page))
-        params.set('pageSize', String(pageSize))
-
-        if (filter === 'incoming') {
-          params.set('direction', 'Incoming')
-        }
-
-        if (filter === 'outgoing') {
-          params.set('direction', 'Outgoing')
-        }
-
-        if (appliedPhoneNumber.trim()) {
-          params.set('phoneNumber', appliedPhoneNumber.trim())
-        }
-
-        if (selectedWhatsAppNumber.trim()) {
-          params.set('whatsAppNumber', selectedWhatsAppNumber.trim())
-        }
-
-        if (appliedStartDate) {
-          params.set('startDate', appliedStartDate)
-        }
-
-        if (appliedEndDate) {
-          params.set('endDate', appliedEndDate)
-        }
-
-        params.set('sortBy', sortBy)
-        params.set('sortOrder', sortOrder)
-
-        const data = await apiFetch<PagedMessageLog>(`/api/messages/search?${params.toString()}`)
-        setMessages(data.items || [])
-        setTotalCount(data.totalCount || 0)
-        setError(null)
-      } catch (err) {
-        console.error('Erro:', err)
-        setError('Falha ao carregar mensagens')
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    loadMessages()
-  }, [filter, appliedPhoneNumber, appliedStartDate, appliedEndDate, selectedWhatsAppNumber, sortBy, sortOrder, page, pageSize])
-
-  const downloadCsv = async () => {
+  const loadData = async () => {
     try {
-      const params = new URLSearchParams()
-
-      if (filter === 'incoming') {
-        params.set('direction', 'Incoming')
-      }
-
-      if (filter === 'outgoing') {
-        params.set('direction', 'Outgoing')
-      }
-
-      if (appliedPhoneNumber.trim()) {
-        params.set('phoneNumber', appliedPhoneNumber.trim())
-      }
-
-      if (selectedWhatsAppNumber.trim()) {
-        params.set('whatsAppNumber', selectedWhatsAppNumber.trim())
-      }
-
-      if (appliedStartDate) {
-        params.set('startDate', appliedStartDate)
-      }
-
-      if (appliedEndDate) {
-        params.set('endDate', appliedEndDate)
-      }
-
-      params.set('sortBy', sortBy)
-      params.set('sortOrder', sortOrder)
-
-      const response = await fetch(`${getApiBase()}/api/messages/export?${params.toString()}`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('bot_jwt') ?? ''}`,
-        },
-      })
-
-      if (!response.ok) {
-        throw new Error('Falha ao exportar CSV')
-      }
-
-      const blob = await response.blob()
-      const url = window.URL.createObjectURL(blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = `messages-${new Date().toISOString().slice(0, 10)}.csv`
-      anchor.click()
-      window.URL.revokeObjectURL(url)
+      const data = await apiFetch<any>(`/api/messages/search?pageSize=2000`);
+      setMessages(data.items || []);
+      const options = await apiFetch<{ numbers: string[] }>(
+        `/api/messages/whatsapp-options`,
+      );
+      setWhatsAppOptions(options.numbers || []);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Falha ao exportar CSV')
+      console.error("Falha ao recarregar mensagens", err);
     }
-  }
+  };
 
-  const resetFilters = () => {
-    setFilter('all')
-    setPhoneNumber('')
-    setStartDate('')
-    setEndDate('')
-    setAppliedPhoneNumber('')
-    setAppliedStartDate('')
-    setAppliedEndDate('')
-    setSelectedWhatsAppNumber('')
-    setSortBy('timestamp')
-    setSortOrder('desc')
-    setPage(1)
-  }
+  useEffect(() => {
+    loadData();
+    const interval = setInterval(loadData, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
-  if (loading) return <div className="container"><div className="loading">Carregando mensagens...</div></div>
-  if (error) return <div className="container"><div className="error">{error}</div></div>
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [activePhone, messages]);
+
+  // Fechar sidebar ao selecionar uma conversa no mobile
+  useEffect(() => {
+    if (activePhone && window.innerWidth <= 768) {
+      setIsSidebarOpen(false);
+    }
+  }, [activePhone]);
+
+  const conversations = useMemo(() => {
+    const groups: Record<string, MessageLog[]> = {};
+    messages.forEach((msg) => {
+      if (!msg.phoneNumber) return;
+
+      const matchesWhatsApp =
+        whatsAppFilter === "all" || msg.whatsAppNumber === whatsAppFilter;
+
+      const displayName = msg.contactName || msg.phoneNumber;
+      const searchSource = `${displayName} ${msg.phoneNumber}`.toLowerCase();
+
+      if (matchesWhatsApp && searchSource.includes(searchTerm.toLowerCase())) {
+        if (!groups[msg.phoneNumber]) groups[msg.phoneNumber] = [];
+        groups[msg.phoneNumber].push(msg);
+      }
+    });
+    return groups;
+  }, [messages, searchTerm, whatsAppFilter]);
+
+  const getDisplayName = (phone: string) => {
+    const msgs = conversations[phone] || [];
+    const clientMsg = msgs.find(
+      (m) => m.contactName && m.direction?.toLowerCase() !== "outgoing",
+    );
+    return clientMsg?.contactName || phone;
+  };
+
+  const handleSendMessage = async () => {
+    if (!newMessage.trim() || !activePhone || isSending) return;
+
+    const messageToSend = newMessage;
+    setNewMessage("");
+    setIsSending(true);
+
+    try {
+      await apiFetch(`/api/messages/bulk/send`, {
+        method: "POST",
+        body: JSON.stringify({
+          phoneNumber: activePhone,
+          message: messageToSend,
+          sourceWhatsAppNumber:
+            whatsAppFilter !== "all" ? whatsAppFilter : null,
+        }),
+      });
+      await loadData();
+    } catch (err) {
+      alert("Erro ao enviar mensagem");
+      setNewMessage(messageToSend);
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const safeGetTime = (dateStr: string | undefined | null) => {
+    if (!dateStr) return 0;
+    const time = new Date(dateStr).getTime();
+    return isNaN(time) ? 0 : time;
+  };
+
+  const safeFormatTime = (dateStr: string | undefined | null) => {
+    if (!dateStr) return "";
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const safeRenderContent = (content: any) => {
+    if (!content) return "";
+    if (typeof content === "object") return "[Mídia/Objeto Não Suportado]";
+    return String(content);
+  };
+
+  const getBubbleClass = (msg: MessageLog) => {
+    const isOutgoing =
+      msg.direction?.toLowerCase() === "outgoing" ||
+      msg.status?.toLowerCase() === "sent";
+    return isOutgoing ? "bubble outgoing" : "bubble incoming";
+  };
+
+  // Alternar sidebar no mobile
+  const toggleSidebar = () => {
+    setIsSidebarOpen(!isSidebarOpen);
+  };
+
+  // Voltar para lista de conversas no mobile
+  const backToConversations = () => {
+    setIsSidebarOpen(true);
+  };
 
   return (
-    <div className="container">
-      <h1>📱 Histórico de Mensagens</h1>
-
-      <div className="filter-buttons">
-        <button
-          className={`btn ${filter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setFilter('all')}
-        >
-          Todas ({messages.length})
-        </button>
-        <button
-          className={`btn ${filter === 'incoming' ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setFilter('incoming')}
-        >
-          📲 Recebidas ({messages.filter(m => m.direction === 'Incoming').length})
-        </button>
-        <button
-          className={`btn ${filter === 'outgoing' ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setFilter('outgoing')}
-        >
-          📤 Enviadas ({messages.filter(m => m.direction === 'Outgoing').length})
-        </button>
-        <button className="btn btn-secondary" onClick={resetFilters}>
-          Limpar filtros
-        </button>
-      </div>
-
-      <div className="message-filters">
-        <input
-          type="text"
-          value={phoneNumber}
-          onChange={(event) => setPhoneNumber(event.target.value)}
-          placeholder="Filtrar por número"
-          className="filter-input"
-        />
-        <input
-          type="date"
-          value={startDate}
-          onChange={(event) => setStartDate(event.target.value)}
-          className="filter-input"
-        />
-        <input
-          type="date"
-          value={endDate}
-          onChange={(event) => setEndDate(event.target.value)}
-          className="filter-input"
-        />
-        <button className="btn btn-primary" onClick={handleFilter}>
-          🔍 Filtrar
-        </button>
-        <select
-          value={selectedWhatsAppNumber}
-          onChange={(event) => setSelectedWhatsAppNumber(event.target.value)}
-          className="filter-input"
-        >
-          <option value="">Todos os numeros WhatsApp</option>
-          {whatsAppOptions.map((number) => (
-            <option key={number} value={number}>{number}</option>
-          ))}
-        </select>
-        <button className="btn btn-secondary" onClick={clearFields}>
-          ✕ Limpar campos
-        </button>
-      </div>
-
-      <div className="pagination-summary">
-        Mostrando {messages.length} de {totalCount} mensagens
-      </div>
-
-      <div className="message-actions">
-        <button className="btn btn-primary" onClick={() => navigate('/messages/bulk')}>
-          Enviar mensagens em lote
-        </button>
-        <button className="btn btn-secondary" onClick={() => void downloadCsv()}>
-          Exportar CSV
-        </button>
-      </div>
-
-      {messages.length === 0 ? (
-        <div className="empty-state">
-          <p>Nenhuma mensagem encontrada</p>
-        </div>
-      ) : (
-        <div className="messages-table">
-          <table>
-            <thead>
-              <tr>
-                <th>Tipo</th>
-                <th>Número</th>
-                <th>WhatsApp</th>
-                <th>Mensagem</th>
-                <th>Status</th>
-                <th>Data/Hora</th>
-              </tr>
-            </thead>
-            <tbody>
-              {messages.map((msg) => (
-                <tr key={msg.id} className={`row-${msg.direction.toLowerCase()}`}>
-                  <td>
-                    <span className={`badge ${msg.direction.toLowerCase()}`}>
-                      {msg.direction === 'Incoming' ? '📲 Recebida' : '📤 Enviada'}
-                    </span>
-                  </td>
-                  <td className="phone"><strong>{msg.phoneNumber}</strong></td>
-                  <td className="phone">{msg.whatsAppNumber || '-'}</td>
-                  <td className="message">{msg.content}</td>
-                  <td>
-                    <span className={`status ${msg.status.toLowerCase()}`}>
-                      {msg.status}
-                    </span>
-                  </td>
-                  <td className="date">
-                    {new Date(msg.timestampUtc).toLocaleString('pt-BR')}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+    <div className="wa-app">
+      {/* Overlay para fechar sidebar no mobile */}
+      {isSidebarOpen && window.innerWidth <= 768 && (
+        <div
+          className="wa-overlay"
+          onClick={() => setIsSidebarOpen(false)}
+        ></div>
       )}
 
-      <div className="pagination-controls">
-        <button className="btn btn-secondary" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={page <= 1}>
-          Anterior
-        </button>
-        <span className="pagination-info">Página {page} de {totalPages}</span>
-        <button className="btn btn-secondary" onClick={() => setPage((value) => Math.min(totalPages, value + 1))} disabled={page >= totalPages}>
-          Próxima
-        </button>
+      {/* Sidebar */}
+      <div className={`wa-sidebar ${isSidebarOpen ? "open" : ""}`}>
+        <div className="sidebar-top-actions">
+          <button
+            className="btn-icon"
+            onClick={() => navigate("/messages/bulk")}
+          >
+            ➕ Enviar Mensagens em Lote
+          </button>
+        </div>
+
+        <div className="wa-filter-container">
+          <select
+            value={whatsAppFilter}
+            onChange={(e) => {
+              setWhatsAppFilter(e.target.value);
+              setActivePhone(null);
+            }}
+          >
+            <option value="all">Todos os WhatsApps</option>
+            {whatsAppOptions.map((num) => (
+              <option key={num} value={num}>
+                {num}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="wa-search-container">
+          <input
+            type="text"
+            placeholder="Pesquisar..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+        </div>
+
+        <div className="wa-chat-list">
+          {Object.keys(conversations).length === 0 ? (
+            <div className="empty-conversations">
+              <p>Nenhuma conversa encontrada</p>
+            </div>
+          ) : (
+            Object.keys(conversations).map((phone) => {
+              const lastMsg = conversations[phone].slice(-1)[0];
+              return (
+                <div
+                  key={phone}
+                  className={`wa-chat-item ${activePhone === phone ? "active" : ""}`}
+                  onClick={() => setActivePhone(phone)}
+                >
+                  <div className="avatar">
+                    {getDisplayName(phone)[0]?.toUpperCase() || "U"}
+                  </div>
+                  <div className="chat-info">
+                    <strong>{getDisplayName(phone)}</strong>
+                    <p>{safeRenderContent(lastMsg?.content)}</p>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* Área Principal de Chat */}
+      <div className={`wa-main ${activePhone ? "active" : ""}`}>
+        {activePhone ? (
+          <>
+            <div className="wa-main-header">
+              {/* Botão hambúrguer no mobile */}
+              <button className="btn-hamburger" onClick={toggleSidebar}>
+                ☰
+              </button>
+
+              {/* Botão voltar no mobile */}
+              <button className="btn-back" onClick={backToConversations}>
+                ←
+              </button>
+
+              <div className="header-contact-info">
+                <div className="avatar-small">
+                  {getDisplayName(activePhone)[0]?.toUpperCase() || "U"}
+                </div>
+                <strong>{getDisplayName(activePhone)}</strong>
+              </div>
+            </div>
+
+            <div className="wa-chat-area">
+              {[...(conversations[activePhone] || [])]
+                .sort(
+                  (a, b) =>
+                    safeGetTime(a.timestampUtc) - safeGetTime(b.timestampUtc),
+                )
+                .map((msg, index) => (
+                  <div
+                    key={msg.id || `msg-${index}`}
+                    className={getBubbleClass(msg)}
+                  >
+                    {safeRenderContent(msg.content)}
+                    <span className="time">
+                      {safeFormatTime(msg.timestampUtc)}
+                    </span>
+                  </div>
+                ))}
+              <div ref={chatEndRef} />
+            </div>
+
+            <div className="wa-chat-input">
+              <input
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
+                placeholder="Digite uma mensagem"
+                disabled={isSending}
+              />
+              <button
+                onClick={handleSendMessage}
+                disabled={isSending || !newMessage.trim()}
+              >
+                {isSending ? "⏳" : "Enviar"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="wa-empty">
+            <div className="empty-content">
+              <div className="empty-icon">💬</div>
+              <h2>WhatsApp Web</h2>
+              <p>Selecione uma conversa para começar</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
-  )
+  );
 }

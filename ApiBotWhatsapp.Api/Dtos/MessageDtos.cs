@@ -6,11 +6,14 @@ public record MessageLogResponse(
     string WhatsAppNumber,
     string Direction,
     string PhoneNumber,
+    string? ContactName, // <--- Adicionado
     string Content,
     bool IsAutomatic,
     string Status,
     DateTime TimestampUtc);
+    
 
+// Os outros records permanecem inalterados
 public record PagedMessageLogResponse(
     IReadOnlyList<MessageLogResponse> Items,
     int TotalCount,

@@ -41,16 +41,17 @@ export type WhitelistItem = {
 }
 
 export type MessageLog = {
-  id: number
-  companyId: number
-  whatsAppNumber: string
-  direction: string
-  phoneNumber: string
-  content: string
-  isAutomatic: boolean
-  status: string
-  timestampUtc: string
-}
+  id: number;
+  companyId: number;
+  whatsAppNumber: string;
+  direction: string;
+  phoneNumber: string;
+  contactName: string | null;
+  content: string;
+  isAutomatic: boolean;
+  status: string;
+  timestampUtc: string;
+};
 
 export type PagedMessageLog = {
   items: MessageLog[]

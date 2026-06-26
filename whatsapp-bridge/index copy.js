@@ -14,6 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SESSIONS_STATE_FILE = path.join(__dirname, ".sessions.json");
 
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -30,22 +31,21 @@ let apiAvailable = false;
 let sessionCounter = 1;
 let persistSessionsQueue = Promise.resolve();
 
+
 const sessions = new Map();
 
 async function loadPersistedSessionIds() {
   try {
     const raw = await fs.readFile(SESSIONS_STATE_FILE, "utf8");
     const parsed = JSON.parse(raw);
-
-    if (!Array.isArray(parsed?.sessions)) {
-      return [];
-    }
-
-    const valid = parsed.sessions
-      .map((item) => String(item ?? "").trim())
-      .filter((item) => item.length > 0);
-
-    return Array.from(new Set(valid));
+    if (!Array.isArray(parsed?.sessions)) return [];
+    return Array.from(
+      new Set(
+        parsed.sessions
+          .map((item) => String(item ?? "").trim())
+          .filter((i) => i.length > 0),
+      ),
+    );
   } catch {
     return [];
   }
@@ -56,7 +56,6 @@ async function savePersistedSessionIds() {
     sessions: Array.from(sessions.keys()).sort(),
     updatedAt: new Date().toISOString(),
   };
-
   await fs.writeFile(
     SESSIONS_STATE_FILE,
     JSON.stringify(payload, null, 2),
@@ -64,11 +63,16 @@ async function savePersistedSessionIds() {
   );
 }
 
+  await fs.writeFile(
+    SESSIONS_STATE_FILE,
+    JSON.stringify(payload, null, 2),
+    "utf8",
+  );
+
 function queuePersistedSessionIds() {
   persistSessionsQueue = persistSessionsQueue
     .catch(() => undefined)
     .then(() => savePersistedSessionIds());
-
   return persistSessionsQueue;
 }
 
@@ -147,14 +151,10 @@ function getAuthSessionDir(sessionId) {
   return path.join(__dirname, ".wwebjs_auth", `session-${sessionId}`);
 }
 
-function ensureSession(id) {
-  const sessionId = normalizeSessionId(id);
-  const existing = sessions.get(sessionId);
-  if (existing) {
-    return existing;
-  }
 
-  updateSessionCounterFromId(sessionId);
+function ensureSession(id) {
+  const sessionId = String(id).trim();
+  if (sessions.has(sessionId)) return sessions.get(sessionId);
 
   const client = new Client({
     authStrategy: new LocalAuth({
@@ -183,66 +183,27 @@ function ensureSession(id) {
     lastError: null,
     clientReady: false,
     isInitializing: false,
-    manualDisconnect: false,
     processedMessages: new Set(),
   };
 
   client.on("qr", async (qr) => {
     session.qrDataUrl = await qrcode.toDataURL(qr);
     session.status = "qr-required";
-    session.clientReady = false;
   });
 
   client.on("ready", async () => {
     session.status = "connected";
     session.clientReady = true;
     session.qrDataUrl = null;
-    session.lastError = null;
-    session.manualDisconnect = false;
-    const info = client.info;
-    session.phoneNumber = info?.wid?.user ?? info?.me?.user ?? null;
-
-    console.log(
-      `[STATUS] ✅ Sessão ${sessionId} PRONTA! O bot agora está ouvindo mensagens novas.`,
-    );
+    session.phoneNumber =
+      client.info?.wid?.user ?? client.info?.me?.user ?? null;
+    console.log(`[STATUS] ✅ Sessão ${sessionId} PRONTA!`);
   });
 
-  client.on("authenticated", () => {
-    session.status = "authenticating";
-    console.log(
-      `[STATUS] Sessão ${sessionId} autenticada. Sincronizando histórico... aguarde.`,
-    );
-  });
-
-  client.on("auth_failure", (message) => {
-    session.status = "auth-failure";
-    session.lastError = message;
-    session.clientReady = false;
-  });
-
-  client.on("disconnected", (reason) => {
-    session.status = "disconnected";
-    session.lastError = reason;
-    session.clientReady = false;
-    session.qrDataUrl = null;
-
-    if (!session.manualDisconnect) {
-      setTimeout(() => {
-        void initializeSessionIfNeeded(session);
-      }, 1500);
-    }
-  });
-
-  // EVENTO UNIFICADO message_create
+  // --- EVENTO ÚNICO PARA ENVIADAS E RECEBIDAS ---
   client.on("message_create", async (message) => {
     try {
-      if (message.fromMe && message.id.fromMe === false) return;
-
-      const isOutgoing = message.fromMe;
-      const rawPhone = isOutgoing ? String(message.to) : String(message.from);
-
-      if (rawPhone.endsWith("@g.us") || rawPhone === "status@broadcast") return;
-
+      // Filtro de mensagens duplicadas (Anti-loop)
       if (session.processedMessages.has(message.id._serialized)) return;
       session.processedMessages.add(message.id._serialized);
       setTimeout(
@@ -250,13 +211,19 @@ function ensureSession(id) {
         60000,
       );
 
+      const rawPhone = message.fromMe
+        ? String(message.to)
+        : String(message.from);
+      if (rawPhone.endsWith("@g.us") || rawPhone === "status@broadcast") return;
+
       const contact = await client.getContactById(rawPhone);
       const phoneNumber = contact.number || rawPhone.replace(/\D/g, "");
-      if (!phoneNumber) return;
-
       const contactName = contact.name || contact.pushname || null;
-      const directionStr = isOutgoing ? "Outgoing" : "Incoming";
-      const response = await axios.post(
+      const directionStr = message.fromMe ? "Outgoing" : "Incoming";
+
+      console.log(`[DEBUG] ${directionStr} | Tel: ${phoneNumber}`);
+
+      await axios.post(
         backendWebhookUrl,
         {
           PhoneNumber: phoneNumber,
@@ -264,35 +231,20 @@ function ensureSession(id) {
           Message: message.body ?? "",
           CompanyCode: backendCompanyCode,
           WhatsAppNumber: session.phoneNumber,
-          MessageTimestampUtc: message.timestamp
-            ? new Date(Number(message.timestamp) * 1000).toISOString()
-            : new Date().toISOString(),
+          // O formato ISO garante que o C# leia exatamente o momento UTC
+          MessageTimestampUtc: new Date(
+            Number(message.timestamp) * 1000,
+          ).toISOString(),
           Direction: directionStr,
         },
-        {
-          validateStatus: () => true,
-          headers: {
-            "Content-Type": "application/json",
-            "X-Webhook-Token": backendWebhookToken,
-          },
-        },
+        { headers: { "X-Webhook-Token": backendWebhookToken } },
       );
-
-      if (response.status >= 400) {
-        session.lastError = `Webhook returned ${response.status}`;
-      } else {
-        session.lastError = null;
-      }
-    } catch (error) {
-      session.lastError = error?.message ?? "Webhook forward failed";
-      console.log(`[ERRO INTERNO] ${error?.message}`);
+    } catch (err) {
+      console.error("Erro no Webhook:", err.message);
     }
   });
 
   sessions.set(sessionId, session);
-  void queuePersistedSessionIds().catch((error) => {
-    console.error("Failed to persist session list:", error?.message ?? error);
-  });
   return session;
 }
 
@@ -306,7 +258,9 @@ async function restartSessionById(id) {
   previous.manualDisconnect = true;
   try {
     await previous.client.destroy();
-  } catch {}
+  } catch {
+    // Ignore client destroy failures during restart.
+  }
 
   sessions.delete(sessionId);
   const recreated = ensureSession(sessionId);
@@ -324,22 +278,30 @@ async function logoutDefinitiveById(id) {
   session.manualDisconnect = true;
   try {
     await session.client.logout();
-  } catch {}
+  } catch {
+    // Some states may fail logout; continue with destroy + cleanup.
+  }
 
   try {
     await session.client.destroy();
-  } catch {}
+  } catch {
+    // Ignore destroy failures while forcing definitive logout.
+  }
 
   sessions.delete(sessionId);
 
   try {
     await fs.rm(getAuthSessionDir(sessionId), { recursive: true, force: true });
-  } catch {}
+  } catch {
+    // Best effort cleanup of local auth artifacts.
+  }
 
   try {
     await queuePersistedSessionIds();
     await savePersistedSessionIds();
-  } catch {}
+  } catch {
+    // Keep endpoint resilient even if metadata persistence fails.
+  }
 
   return { id: sessionId };
 }
@@ -368,11 +330,15 @@ async function disconnectSession(session, { logout = false } = {}) {
   if (logout) {
     try {
       await session.client.logout();
-    } catch {}
+    } catch {
+      // Ignore and continue with cleanup state.
+    }
   } else {
     try {
       await session.client.destroy();
-    } catch {}
+    } catch {
+      // Ignore and continue with cleanup state.
+    }
   }
 
   session.status = "disconnected";
@@ -587,6 +553,7 @@ app.post("/session/:id/pairing-code", async (req, res) => {
   }
 });
 
+// Legacy endpoints kept for compatibility with older API client versions.
 app.get("/session/qr", (_req, res) => {
   const session = getSessionOrDefault("default");
   if (!session || !session.qrDataUrl) {
@@ -658,18 +625,6 @@ app.post("/messages/send", async (req, res) => {
       String(message),
     );
 
-    // 👇 SOLUÇÃO DA DUPLICAÇÃO DE MENSAGENS ENVIADAS PELO SISTEMA
-    // Injeta o ID da mensagem no cache para que o evento 'message_create' ignore ela
-    if (result && result.id) {
-      senderSession.processedMessages =
-        senderSession.processedMessages || new Set();
-      senderSession.processedMessages.add(result.id._serialized);
-      setTimeout(
-        () => senderSession.processedMessages.delete(result.id._serialized),
-        60000,
-      );
-    }
-
     let unreadApplied = false;
     if (Boolean(markAsUnread)) {
       try {
@@ -695,22 +650,24 @@ app.post("/messages/send", async (req, res) => {
   }
 });
 
+// --- Servidor e Inicialização ---
 app.listen(port, () => {
   console.log(`WhatsApp bridge running on http://localhost:${port}`);
-  console.log(`Backend webhook target: ${backendWebhookUrl}`);
-  void refreshApiAvailability();
-  console.log(`Session state file: ${SESSIONS_STATE_FILE}`);
+  void restorePersistedSessions();
 });
 
+
 async function restorePersistedSessions() {
-  const restoredIds = await loadPersistedSessionIds();
-  if (restoredIds.length === 0) {
-    return;
+  const ids = await loadPersistedSessionIds();
+  for (const id of ids) {
+    const session = ensureSession(id);
+    await session.client.initialize().catch(() => {});
   }
 
   console.log(`Restoring ${restoredIds.length} persisted session(s)...`);
   for (const id of restoredIds) {
     const session = ensureSession(id);
+    // Keep startup resilient: restore all sessions even if one fails.
     await initializeSessionIfNeeded(session).catch((error) => {
       session.lastError = error?.message ?? "Unable to restore session";
       session.status = "error";

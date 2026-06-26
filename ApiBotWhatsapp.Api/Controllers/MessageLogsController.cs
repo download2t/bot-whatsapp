@@ -32,16 +32,18 @@ public class MessageLogsController(AppDbContext dbContext, WhatsAppBridgeClient 
             .Where(item => item.CompanyId == companyId.Value)
             .OrderByDescending(item => item.TimestampUtc)
             .Take(take)
-            .Select(item => new MessageLogResponse(
-                item.Id,
-                item.CompanyId,
-                item.WhatsAppNumber,
-                item.Direction,
-                item.PhoneNumber,
-                item.Content,
-                item.IsAutomatic,
-                item.Status,
-                item.TimestampUtc))
+            .Select(log => new MessageLogResponse(
+                log.Id,
+                log.CompanyId,
+                log.WhatsAppNumber,
+                log.Direction,
+                log.PhoneNumber,
+                log.ContactName, // Lê direto da propriedade na própria mensagem!
+                log.Content,
+                log.IsAutomatic,
+                log.Status,
+                log.TimestampUtc
+            ))
             .ToListAsync(cancellationToken);
 
         return Ok(logs);
@@ -70,23 +72,25 @@ public class MessageLogsController(AppDbContext dbContext, WhatsAppBridgeClient 
         pageSize = Math.Clamp(pageSize, 5, 100);
 
         var query = BuildQuery(companyId.Value, phoneNumber, whatsAppNumber, direction, startDate, endDate);
-
         var orderedQuery = ApplySorting(query, sortBy, sortOrder);
 
         var totalCount = await orderedQuery.CountAsync(cancellationToken);
+        
         var items = await orderedQuery
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(item => new MessageLogResponse(
-                item.Id,
-                item.CompanyId,
-                item.WhatsAppNumber,
-                item.Direction,
-                item.PhoneNumber,
-                item.Content,
-                item.IsAutomatic,
-                item.Status,
-                item.TimestampUtc))
+            .Select(log => new MessageLogResponse(
+                log.Id,
+                log.CompanyId,
+                log.WhatsAppNumber,
+                log.Direction,
+                log.PhoneNumber,
+                log.ContactName, // Lê direto da propriedade na própria mensagem!
+                log.Content,
+                log.IsAutomatic,
+                log.Status,
+                log.TimestampUtc
+            ))
             .ToListAsync(cancellationToken);
 
         return Ok(new PagedMessageLogResponse(items, totalCount, page, pageSize));
@@ -112,20 +116,22 @@ public class MessageLogsController(AppDbContext dbContext, WhatsAppBridgeClient 
         var query = ApplySorting(BuildQuery(companyId.Value, phoneNumber, whatsAppNumber, direction, startDate, endDate), sortBy, sortOrder);
 
         var items = await query
-            .Select(item => new MessageLogResponse(
-                item.Id,
-                item.CompanyId,
-                item.WhatsAppNumber,
-                item.Direction,
-                item.PhoneNumber,
-                item.Content,
-                item.IsAutomatic,
-                item.Status,
-                item.TimestampUtc))
+            .Select(log => new MessageLogResponse(
+                log.Id,
+                log.CompanyId,
+                log.WhatsAppNumber,
+                log.Direction,
+                log.PhoneNumber,
+                log.ContactName, // Lê direto da propriedade na própria mensagem!
+                log.Content,
+                log.IsAutomatic,
+                log.Status,
+                log.TimestampUtc
+            ))
             .ToListAsync(cancellationToken);
 
         var csv = new StringBuilder();
-        csv.AppendLine("Id,CompanyId,WhatsAppNumber,Direction,PhoneNumber,Content,IsAutomatic,Status,TimestampUtc");
+        csv.AppendLine("Id,CompanyId,WhatsAppNumber,Direction,PhoneNumber,ContactName,Content,IsAutomatic,Status,TimestampUtc");
 
         foreach (var item in items)
         {
@@ -135,6 +141,7 @@ public class MessageLogsController(AppDbContext dbContext, WhatsAppBridgeClient 
                 Csv(item.WhatsAppNumber),
                 Csv(item.Direction),
                 Csv(item.PhoneNumber),
+                Csv(item.ContactName ?? string.Empty), 
                 Csv(item.Content),
                 item.IsAutomatic ? "true" : "false",
                 Csv(item.Status),

@@ -66,4 +66,55 @@ public class BulkMessagesController(AppDbContext dbContext, WhatsAppMessageSende
 
         return Ok(results);
     }
+
+    [HttpPost("send")]
+    public async Task<IActionResult> SendMessage(
+        [FromBody] SendMessageRequest request,
+        [FromServices] ApiBotWhatsapp.Api.Services.WhatsAppMessageSender sender,
+        CancellationToken cancellationToken)
+    {
+        var companyId = GetCurrentCompanyId();
+        if (companyId is null) return Unauthorized("Company not found in token.");
+
+        var targetPhone = request.PhoneNumber; 
+        var textMessage = request.Message;
+
+        if (string.IsNullOrWhiteSpace(targetPhone) || string.IsNullOrWhiteSpace(textMessage))
+        {
+            return BadRequest("Telefone e Mensagem são obrigatórios.");
+        }
+
+        var normalizedPhone = ApiBotWhatsapp.Api.Utils.PhoneNumberUtils.Normalize(targetPhone);
+
+        var sourceNumber = request.GetType().GetProperty("SourceWhatsAppNumber") != null 
+            ? (string?)request.GetType().GetProperty("SourceWhatsAppNumber")?.GetValue(request, null) 
+            : null;
+
+        var (success, status) = await sender.SendMessageAsync(
+            normalizedPhone, 
+            textMessage, 
+            false, // markAsUnread
+            sourceNumber, 
+            cancellationToken
+        );
+
+        if (!success) return BadRequest($"Falha ao enviar: {status}");
+
+        var log = new ApiBotWhatsapp.Api.Models.MessageLog
+        {
+            CompanyId = companyId.Value,
+            WhatsAppNumber = sourceNumber ?? string.Empty,
+            PhoneNumber = normalizedPhone,
+            Direction = "Outgoing",
+            Content = textMessage,
+            TimestampUtc = DateTime.UtcNow,
+            Status = "Sent",
+            IsAutomatic = false
+        };
+
+        dbContext.MessageLogs.Add(log);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new { success = true, status });
+    }
 }

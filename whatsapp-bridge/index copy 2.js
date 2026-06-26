@@ -1,30 +1,27 @@
-import "dotenv/config";
-import express from "express";
-import cors from "cors";
-import axios from "axios";
-import qrcode from "qrcode";
-import whatsappWebJs from "whatsapp-web.js";
-import fs from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+import axios from 'axios';
+import qrcode from 'qrcode';
+import whatsappWebJs from 'whatsapp-web.js';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const { Client, LocalAuth } = whatsappWebJs;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const SESSIONS_STATE_FILE = path.join(__dirname, ".sessions.json");
+const SESSIONS_STATE_FILE = path.join(__dirname, '.sessions.json');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const port = Number(process.env.BRIDGE_PORT ?? 3001);
-const backendWebhookUrl =
-  process.env.BACKEND_WEBHOOK_URL ??
-  "http://localhost:5207/api/webhooks/whatsapp";
-const backendWebhookToken =
-  process.env.BACKEND_WEBHOOK_TOKEN ?? "CHANGE_THIS_WEBHOOK_TOKEN";
-const backendCompanyCode = process.env.BACKEND_COMPANY_CODE ?? "EMPRESA-TESTE";
+const backendWebhookUrl = process.env.BACKEND_WEBHOOK_URL ?? 'http://localhost:5207/api/webhooks/whatsapp';
+const backendWebhookToken = process.env.BACKEND_WEBHOOK_TOKEN ?? 'CHANGE_THIS_WEBHOOK_TOKEN';
+const backendCompanyCode = process.env.BACKEND_COMPANY_CODE ?? 'EMPRESA-TESTE';
 
 let apiAvailable = false;
 let sessionCounter = 1;
@@ -34,7 +31,7 @@ const sessions = new Map();
 
 async function loadPersistedSessionIds() {
   try {
-    const raw = await fs.readFile(SESSIONS_STATE_FILE, "utf8");
+    const raw = await fs.readFile(SESSIONS_STATE_FILE, 'utf8');
     const parsed = JSON.parse(raw);
 
     if (!Array.isArray(parsed?.sessions)) {
@@ -42,7 +39,7 @@ async function loadPersistedSessionIds() {
     }
 
     const valid = parsed.sessions
-      .map((item) => String(item ?? "").trim())
+      .map((item) => String(item ?? '').trim())
       .filter((item) => item.length > 0);
 
     return Array.from(new Set(valid));
@@ -57,11 +54,7 @@ async function savePersistedSessionIds() {
     updatedAt: new Date().toISOString(),
   };
 
-  await fs.writeFile(
-    SESSIONS_STATE_FILE,
-    JSON.stringify(payload, null, 2),
-    "utf8",
-  );
+  await fs.writeFile(SESSIONS_STATE_FILE, JSON.stringify(payload, null, 2), 'utf8');
 }
 
 function queuePersistedSessionIds() {
@@ -85,7 +78,7 @@ function updateSessionCounterFromId(sessionId) {
 }
 
 function normalizePhone(raw) {
-  return String(raw ?? "").replace(/\D/g, "");
+  return String(raw ?? '').replace(/\D/g, '');
 }
 
 function sessionToStatus(session) {
@@ -111,13 +104,10 @@ function buildSessionId() {
 
 async function refreshApiAvailability() {
   try {
-    const response = await axios.get(
-      `${new URL(backendWebhookUrl).origin}/health`,
-      {
-        timeout: 2500,
-        validateStatus: () => true,
-      },
-    );
+    const response = await axios.get(`${new URL(backendWebhookUrl).origin}/health`, {
+      timeout: 2500,
+      validateStatus: () => true,
+    });
 
     apiAvailable = response.status >= 200 && response.status < 300;
     return apiAvailable;
@@ -129,22 +119,22 @@ async function refreshApiAvailability() {
 
 function getSessionOrDefault(id) {
   if (!id || !sessions.has(id)) {
-    return sessions.get("default") ?? null;
+    return sessions.get('default') ?? null;
   }
 
   return sessions.get(id) ?? null;
 }
 
 function normalizeSessionId(id) {
-  if (!id || id === "default") {
-    return "default";
+  if (!id || id === 'default') {
+    return 'default';
   }
 
   return String(id).trim();
 }
 
 function getAuthSessionDir(sessionId) {
-  return path.join(__dirname, ".wwebjs_auth", `session-${sessionId}`);
+  return path.join(__dirname, '.wwebjs_auth', `session-${sessionId}`);
 }
 
 function ensureSession(id) {
@@ -159,69 +149,62 @@ function ensureSession(id) {
   const client = new Client({
     authStrategy: new LocalAuth({
       clientId: sessionId,
-      dataPath: path.join(__dirname, ".wwebjs_auth"),
+      dataPath: path.join(__dirname, '.wwebjs_auth'),
     }),
     puppeteer: {
       headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-background-timer-throttling",
-        "--disable-backgrounding-occluded-windows",
-        "--disable-renderer-backgrounding",
-        "--disable-features=CalculateNativeWinOcclusion",
-      ],
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
     },
   });
 
   const session = {
     id: sessionId,
     client,
-    status: "initializing",
+    status: 'initializing',
     qrDataUrl: null,
     phoneNumber: null,
     lastError: null,
     clientReady: false,
     isInitializing: false,
     manualDisconnect: false,
-    processedMessages: new Set(),
   };
 
-  client.on("qr", async (qr) => {
+  client.on('qr', async (qr) => {
     session.qrDataUrl = await qrcode.toDataURL(qr);
-    session.status = "qr-required";
+    session.status = 'qr-required';
     session.clientReady = false;
   });
 
-  client.on("ready", async () => {
-    session.status = "connected";
-    session.clientReady = true;
-    session.qrDataUrl = null;
-    session.lastError = null;
-    session.manualDisconnect = false;
-    const info = client.info;
-    session.phoneNumber = info?.wid?.user ?? info?.me?.user ?? null;
+client.on("ready", async () => {
+  session.status = "connected";
+  session.clientReady = true;
+  session.qrDataUrl = null;
+  session.lastError = null;
+  session.manualDisconnect = false;
+  const info = client.info;
+  session.phoneNumber = info?.wid?.user ?? info?.me?.user ?? null;
 
-    console.log(
-      `[STATUS] ✅ Sessão ${sessionId} PRONTA! O bot agora está ouvindo mensagens novas.`,
-    );
-  });
+  // 👇 ADICIONE ESTE LOG
+  console.log(
+    `[STATUS] ✅ Sessão ${sessionId} PRONTA! O bot agora está ouvindo mensagens novas.`,
+  );
+});
 
-  client.on("authenticated", () => {
-    session.status = "authenticating";
-    console.log(
-      `[STATUS] Sessão ${sessionId} autenticada. Sincronizando histórico... aguarde.`,
-    );
-  });
+client.on("authenticated", () => {
+  session.status = "authenticating";
+  console.log(
+    `[STATUS] Sessão ${sessionId} autenticada. Sincronizando histórico... aguarde.`,
+  );
+});
 
-  client.on("auth_failure", (message) => {
-    session.status = "auth-failure";
+  client.on('auth_failure', (message) => {
+    session.status = 'auth-failure';
     session.lastError = message;
     session.clientReady = false;
   });
 
-  client.on("disconnected", (reason) => {
-    session.status = "disconnected";
+  client.on('disconnected', (reason) => {
+    session.status = 'disconnected';
     session.lastError = reason;
     session.clientReady = false;
     session.qrDataUrl = null;
@@ -233,68 +216,111 @@ function ensureSession(id) {
     }
   });
 
-  // EVENTO UNIFICADO message_create
-  client.on("message_create", async (message) => {
-    try {
-      if (message.fromMe && message.id.fromMe === false) return;
-
-      const isOutgoing = message.fromMe;
-      const rawPhone = isOutgoing ? String(message.to) : String(message.from);
-
-      if (rawPhone.endsWith("@g.us") || rawPhone === "status@broadcast") return;
-
-      if (session.processedMessages.has(message.id._serialized)) return;
-      session.processedMessages.add(message.id._serialized);
-      setTimeout(
-        () => session.processedMessages.delete(message.id._serialized),
-        60000,
-      );
-
-      const contact = await client.getContactById(rawPhone);
-      const phoneNumber = contact.number || rawPhone.replace(/\D/g, "");
-      if (!phoneNumber) return;
-
-      const contactName = contact.name || contact.pushname || null;
-      const directionStr = isOutgoing ? "Outgoing" : "Incoming";
-      const response = await axios.post(
-        backendWebhookUrl,
-        {
-          PhoneNumber: phoneNumber,
-          ContactName: contactName,
-          Message: message.body ?? "",
-          CompanyCode: backendCompanyCode,
-          WhatsAppNumber: session.phoneNumber,
-          MessageTimestampUtc: message.timestamp
-            ? new Date(Number(message.timestamp) * 1000).toISOString()
-            : new Date().toISOString(),
-          Direction: directionStr,
-        },
-        {
-          validateStatus: () => true,
-          headers: {
-            "Content-Type": "application/json",
-            "X-Webhook-Token": backendWebhookToken,
-          },
-        },
-      );
-
-      if (response.status >= 400) {
-        session.lastError = `Webhook returned ${response.status}`;
-      } else {
-        session.lastError = null;
-      }
-    } catch (error) {
-      session.lastError = error?.message ?? "Webhook forward failed";
-      console.log(`[ERRO INTERNO] ${error?.message}`);
+client.on("message", async (message) => {
+  try {
+    if (message.fromMe || !message.from) {
+      return;
     }
-  });
+
+    const source = String(message.from);
+    if (source.endsWith("@g.us") || source === "status@broadcast") {
+      return;
+    }
+
+    // Filtro anti-duplicação
+    session.processedMessages = session.processedMessages || new Set();
+
+    client.on("message_create", async (message) => {
+      // 👇 LOG CRU: Imprime qualquer coisa antes de qualquer filtro
+      console.log(
+        `[RAW] Evento detectado! fromMe: ${message.fromMe} | from: ${message.from} | to: ${message.to}`,
+      );
+
+      try {
+        const isOutgoing = message.fromMe;
+
+        // Define quem é a OUTRA pessoa da conversa
+        const rawPhone = isOutgoing ? String(message.to) : String(message.from);
+
+        // Ignora grupos e status
+        if (rawPhone.endsWith("@g.us") || rawPhone === "status@broadcast")
+          return;
+
+        // Ignora mensagens duplicadas do evento
+        if (session.processedMessages.has(message.id._serialized)) return;
+        session.processedMessages.add(message.id._serialized);
+        setTimeout(
+          () => session.processedMessages.delete(message.id._serialized),
+          60000,
+        );
+
+        // Busca o contato
+        const contact = await client.getContactById(rawPhone);
+
+        // Extrai o número e ignora se vier vazio
+        const phoneNumber = contact.number || rawPhone.replace(/\D/g, "");
+        if (!phoneNumber) return;
+
+        // Captura o nome da pessoa
+        const contactName = contact.name || contact.pushname || null;
+        const directionStr = isOutgoing ? "Outgoing" : "Incoming";
+
+        console.log(
+          `[DEBUG] Nova mensagem (${directionStr}) | Tel: ${phoneNumber} | Nome: ${contactName}`,
+        );
+
+        // Envia para o C#
+        const response = await axios.post(
+          backendWebhookUrl,
+          {
+            PhoneNumber: phoneNumber,
+            ContactName: contactName,
+            Message: message.body ?? "",
+            CompanyCode: backendCompanyCode,
+            WhatsAppNumber: session.phoneNumber,
+            MessageTimestampUtc: message.timestamp
+              ? new Date(Number(message.timestamp) * 1000).toISOString()
+              : new Date().toISOString(),
+            Direction: directionStr,
+          },
+          {
+            validateStatus: () => true,
+            headers: {
+              "Content-Type": "application/json",
+              "X-Webhook-Token": backendWebhookToken,
+            },
+          },
+        );
+
+        if (response.status >= 400) {
+          session.lastError = `Webhook returned ${response.status}`;
+        } else {
+          session.lastError = null;
+        }
+      } catch (error) {
+        session.lastError = error?.message ?? "Webhook forward failed";
+        console.log(`[ERRO INTERNO] ${error?.message}`);
+      }
+    });
+    
+    if (response.status >= 400) {
+      session.lastError = `Webhook returned ${response.status}`;
+      return;
+    }
+
+    session.lastError = null;
+  } catch (error) {
+    session.lastError = error?.message ?? "Webhook forward failed";
+  }
+});
 
   sessions.set(sessionId, session);
   void queuePersistedSessionIds().catch((error) => {
-    console.error("Failed to persist session list:", error?.message ?? error);
+    console.error('Failed to persist session list:', error?.message ?? error);
   });
   return session;
 }
+
 
 async function restartSessionById(id) {
   const sessionId = normalizeSessionId(id);
@@ -306,7 +332,9 @@ async function restartSessionById(id) {
   previous.manualDisconnect = true;
   try {
     await previous.client.destroy();
-  } catch {}
+  } catch {
+    // Ignore client destroy failures during restart.
+  }
 
   sessions.delete(sessionId);
   const recreated = ensureSession(sessionId);
@@ -324,22 +352,30 @@ async function logoutDefinitiveById(id) {
   session.manualDisconnect = true;
   try {
     await session.client.logout();
-  } catch {}
+  } catch {
+    // Some states may fail logout; continue with destroy + cleanup.
+  }
 
   try {
     await session.client.destroy();
-  } catch {}
+  } catch {
+    // Ignore destroy failures while forcing definitive logout.
+  }
 
   sessions.delete(sessionId);
 
   try {
     await fs.rm(getAuthSessionDir(sessionId), { recursive: true, force: true });
-  } catch {}
+  } catch {
+    // Best effort cleanup of local auth artifacts.
+  }
 
   try {
     await queuePersistedSessionIds();
     await savePersistedSessionIds();
-  } catch {}
+  } catch {
+    // Keep endpoint resilient even if metadata persistence fails.
+  }
 
   return { id: sessionId };
 }
@@ -351,12 +387,11 @@ async function initializeSessionIfNeeded(session) {
 
   try {
     session.isInitializing = true;
-    session.status = "connecting";
+    session.status = 'connecting';
     await session.client.initialize();
   } catch (error) {
-    session.lastError =
-      error?.message ?? "Unable to initialize WhatsApp client";
-    session.status = "error";
+    session.lastError = error?.message ?? 'Unable to initialize WhatsApp client';
+    session.status = 'error';
   } finally {
     session.isInitializing = false;
   }
@@ -368,14 +403,18 @@ async function disconnectSession(session, { logout = false } = {}) {
   if (logout) {
     try {
       await session.client.logout();
-    } catch {}
+    } catch {
+      // Ignore and continue with cleanup state.
+    }
   } else {
     try {
       await session.client.destroy();
-    } catch {}
+    } catch {
+      // Ignore and continue with cleanup state.
+    }
   }
 
-  session.status = "disconnected";
+  session.status = 'disconnected';
   session.clientReady = false;
   session.qrDataUrl = null;
   session.phoneNumber = null;
@@ -386,47 +425,40 @@ function pickSenderSession(sourceWhatsAppNumber) {
   const allSessions = Array.from(sessions.values());
 
   if (normalizedSource) {
-    const matching = allSessions.find(
-      (item) =>
-        item.clientReady &&
-        normalizePhone(item.phoneNumber) === normalizedSource,
-    );
+    const matching = allSessions.find(item => item.clientReady && normalizePhone(item.phoneNumber) === normalizedSource);
     if (matching) {
       return matching;
     }
   }
 
-  const defaultConnected = sessions.get("default");
+  const defaultConnected = sessions.get('default');
   if (defaultConnected?.clientReady) {
     return defaultConnected;
   }
 
-  return allSessions.find((item) => item.clientReady) ?? null;
+  return allSessions.find(item => item.clientReady) ?? null;
 }
 
-app.get("/health", (_req, res) => {
-  const connected = Array.from(sessions.values()).filter(
-    (item) => item.clientReady,
-  ).length;
+app.get('/health', (_req, res) => {
+  const connected = Array.from(sessions.values()).filter(item => item.clientReady).length;
   res.json({ ok: true, connectedSessions: connected });
 });
 
-app.get("/session/list", (_req, res) => {
+app.get('/session/list', (_req, res) => {
   void refreshApiAvailability();
   const payload = Array.from(sessions.values()).map(sessionToStatus);
   res.json(payload);
 });
 
-app.get("/session/status", (_req, res) => {
+app.get('/session/status', (_req, res) => {
   void refreshApiAvailability();
-  const selected =
-    Array.from(sessions.values()).find((item) => item.clientReady) ??
-    sessions.get("default") ??
-    null;
+  const selected = Array.from(sessions.values()).find(item => item.clientReady)
+    ?? sessions.get('default')
+    ?? null;
 
   if (!selected) {
     return res.json({
-      status: "not-initialized",
+      status: 'not-initialized',
       isConnected: false,
       hasQr: false,
       apiAvailable,
@@ -445,13 +477,13 @@ app.get("/session/status", (_req, res) => {
   });
 });
 
-app.post("/session/create", async (_req, res) => {
+app.post('/session/create', async (_req, res) => {
   const id = buildSessionId();
   ensureSession(id);
-  return res.status(201).json({ id, status: "created" });
+  return res.status(201).json({ id, status: 'created' });
 });
 
-app.get("/session/:id/qr", (req, res) => {
+app.get('/session/:id/qr', (req, res) => {
   const session = getSessionOrDefault(req.params.id);
   if (!session || !session.qrDataUrl) {
     return res.status(404).json({ qrDataUrl: null });
@@ -460,58 +492,54 @@ app.get("/session/:id/qr", (req, res) => {
   return res.json({ qrDataUrl: session.qrDataUrl });
 });
 
-app.post("/session/:id/connect", async (req, res) => {
+app.post('/session/:id/connect', async (req, res) => {
   try {
-    const id = req.params.id === "default" ? "default" : req.params.id;
+    const id = req.params.id === 'default' ? 'default' : req.params.id;
     const session = ensureSession(id);
     await initializeSessionIfNeeded(session);
     return res.status(202).json({ status: session.status, id: session.id });
   } catch (error) {
-    return res
-      .status(500)
-      .json({ error: error?.message ?? "Unable to connect" });
+    return res.status(500).json({ error: error?.message ?? 'Unable to connect' });
   }
 });
 
-app.post("/session/:id/disconnect", async (req, res) => {
+app.post('/session/:id/disconnect', async (req, res) => {
   const session = getSessionOrDefault(req.params.id);
   if (!session) {
-    return res.status(404).json({ error: "Session not found" });
+    return res.status(404).json({ error: 'Session not found' });
   }
 
   try {
     await disconnectSession(session, { logout: false });
     return res.status(202).json({ status: session.status, id: session.id });
   } catch (error) {
-    session.lastError = error?.message ?? "Unable to disconnect";
+    session.lastError = error?.message ?? 'Unable to disconnect';
     return res.status(500).json({ error: session.lastError });
   }
 });
 
-app.post("/session/:id/restart", async (req, res) => {
+app.post('/session/:id/restart', async (req, res) => {
   const sessionId = normalizeSessionId(req.params.id);
 
   try {
     const restarted = await restartSessionById(sessionId);
     if (!restarted) {
-      return res.status(404).json({ error: "Session not found" });
+      return res.status(404).json({ error: 'Session not found' });
     }
 
     return res.status(202).json({
       ok: true,
       id: restarted.id,
-      action: "restart",
+      action: 'restart',
       preservedAuth: true,
       status: restarted.status,
     });
   } catch (error) {
-    return res
-      .status(500)
-      .json({ error: error?.message ?? "Unable to restart session" });
+    return res.status(500).json({ error: error?.message ?? 'Unable to restart session' });
   }
 });
 
-app.post("/session/restart-all", async (_req, res) => {
+app.post('/session/restart-all', async (_req, res) => {
   const ids = Array.from(sessions.keys());
   const restarted = [];
   const failed = [];
@@ -523,72 +551,67 @@ app.post("/session/restart-all", async (_req, res) => {
         restarted.push(id);
       }
     } catch (error) {
-      failed.push({ id, error: error?.message ?? "Unable to restart session" });
+      failed.push({ id, error: error?.message ?? 'Unable to restart session' });
     }
   }
 
   return res.status(202).json({
     ok: failed.length === 0,
-    action: "restart-all",
+    action: 'restart-all',
     total: ids.length,
     restarted,
     failed,
   });
 });
 
-app.post("/session/:id/logout-definitivo", async (req, res) => {
+app.post('/session/:id/logout-definitivo', async (req, res) => {
   const sessionId = normalizeSessionId(req.params.id);
 
   try {
     const removed = await logoutDefinitiveById(sessionId);
     if (!removed) {
-      return res.status(404).json({ error: "Session not found" });
+      return res.status(404).json({ error: 'Session not found' });
     }
 
     return res.json({
       ok: true,
       id: removed.id,
-      action: "logout-definitivo",
+      action: 'logout-definitivo',
       removedFromPersistence: true,
     });
   } catch (error) {
-    return res
-      .status(500)
-      .json({ error: error?.message ?? "Unable to logout definitively" });
+    return res.status(500).json({ error: error?.message ?? 'Unable to logout definitively' });
   }
 });
 
-app.post("/session/:id/pairing-code", async (req, res) => {
+app.post('/session/:id/pairing-code', async (req, res) => {
   const session = getSessionOrDefault(req.params.id);
   if (!session) {
-    return res.status(404).json({ error: "Session not found" });
+    return res.status(404).json({ error: 'Session not found' });
   }
 
   try {
     const phoneNumber = normalizePhone(req.body?.phoneNumber);
     if (!phoneNumber) {
-      return res.status(400).json({ error: "phoneNumber is required" });
+      return res.status(400).json({ error: 'phoneNumber is required' });
     }
 
     await initializeSessionIfNeeded(session);
-    if (typeof session.client.requestPairingCode !== "function") {
-      return res
-        .status(501)
-        .json({
-          error: "Pairing code is not supported by this bridge version",
-        });
+    if (typeof session.client.requestPairingCode !== 'function') {
+      return res.status(501).json({ error: 'Pairing code is not supported by this bridge version' });
     }
 
     const pairingCode = await session.client.requestPairingCode(phoneNumber);
     return res.json({ pairingCode });
   } catch (error) {
-    session.lastError = error?.message ?? "Unable to generate pairing code";
+    session.lastError = error?.message ?? 'Unable to generate pairing code';
     return res.status(500).json({ error: session.lastError });
   }
 });
 
-app.get("/session/qr", (_req, res) => {
-  const session = getSessionOrDefault("default");
+// Legacy endpoints kept for compatibility with older API client versions.
+app.get('/session/qr', (_req, res) => {
+  const session = getSessionOrDefault('default');
   if (!session || !session.qrDataUrl) {
     return res.status(404).json({ qrDataUrl: null });
   }
@@ -596,85 +619,63 @@ app.get("/session/qr", (_req, res) => {
   return res.json({ qrDataUrl: session.qrDataUrl });
 });
 
-app.post("/session/connect", async (_req, res) => {
-  const session = ensureSession("default");
+app.post('/session/connect', async (_req, res) => {
+  const session = ensureSession('default');
   await initializeSessionIfNeeded(session);
   return res.status(202).json({ status: session.status, id: session.id });
 });
 
-app.post("/session/disconnect", async (_req, res) => {
-  const session = getSessionOrDefault("default");
+app.post('/session/disconnect', async (_req, res) => {
+  const session = getSessionOrDefault('default');
   if (!session) {
-    return res.status(404).json({ error: "Session not found" });
+    return res.status(404).json({ error: 'Session not found' });
   }
 
   await disconnectSession(session, { logout: false });
   return res.status(202).json({ status: session.status, id: session.id });
 });
 
-app.post("/session/pairing-code", async (req, res) => {
-  const session = getSessionOrDefault("default");
+app.post('/session/pairing-code', async (req, res) => {
+  const session = getSessionOrDefault('default');
   if (!session) {
-    return res.status(404).json({ error: "Session not found" });
+    return res.status(404).json({ error: 'Session not found' });
   }
 
   const phoneNumber = normalizePhone(req.body?.phoneNumber);
   if (!phoneNumber) {
-    return res.status(400).json({ error: "phoneNumber is required" });
+    return res.status(400).json({ error: 'phoneNumber is required' });
   }
 
   await initializeSessionIfNeeded(session);
-  if (typeof session.client.requestPairingCode !== "function") {
-    return res
-      .status(501)
-      .json({ error: "Pairing code is not supported by this bridge version" });
+  if (typeof session.client.requestPairingCode !== 'function') {
+    return res.status(501).json({ error: 'Pairing code is not supported by this bridge version' });
   }
 
   const pairingCode = await session.client.requestPairingCode(phoneNumber);
   return res.json({ pairingCode });
 });
 
-app.post("/messages/send", async (req, res) => {
+app.post('/messages/send', async (req, res) => {
   try {
-    const { phoneNumber, message, markAsUnread, sourceWhatsAppNumber } =
-      req.body ?? {};
+    const { phoneNumber, message, markAsUnread, sourceWhatsAppNumber } = req.body ?? {};
     if (!phoneNumber || !message) {
-      return res
-        .status(400)
-        .json({ error: "phoneNumber and message are required" });
+      return res.status(400).json({ error: 'phoneNumber and message are required' });
     }
 
     const senderSession = pickSenderSession(sourceWhatsAppNumber);
     if (!senderSession) {
-      return res
-        .status(409)
-        .json({ error: "No connected WhatsApp session available" });
+      return res.status(409).json({ error: 'No connected WhatsApp session available' });
     }
 
     const normalizedPhone = normalizePhone(phoneNumber);
     const target = `${normalizedPhone}@c.us`;
-    const result = await senderSession.client.sendMessage(
-      target,
-      String(message),
-    );
-
-    // 👇 SOLUÇÃO DA DUPLICAÇÃO DE MENSAGENS ENVIADAS PELO SISTEMA
-    // Injeta o ID da mensagem no cache para que o evento 'message_create' ignore ela
-    if (result && result.id) {
-      senderSession.processedMessages =
-        senderSession.processedMessages || new Set();
-      senderSession.processedMessages.add(result.id._serialized);
-      setTimeout(
-        () => senderSession.processedMessages.delete(result.id._serialized),
-        60000,
-      );
-    }
+    const result = await senderSession.client.sendMessage(target, String(message));
 
     let unreadApplied = false;
     if (Boolean(markAsUnread)) {
       try {
         const chat = await senderSession.client.getChatById(target);
-        if (chat && typeof chat.markUnread === "function") {
+        if (chat && typeof chat.markUnread === 'function') {
           await chat.markUnread();
           unreadApplied = true;
         }
@@ -691,7 +692,7 @@ app.post("/messages/send", async (req, res) => {
       unreadApplied,
     });
   } catch (error) {
-    return res.status(500).json({ error: error?.message ?? "Send failed" });
+    return res.status(500).json({ error: error?.message ?? 'Send failed' });
   }
 });
 
@@ -711,25 +712,21 @@ async function restorePersistedSessions() {
   console.log(`Restoring ${restoredIds.length} persisted session(s)...`);
   for (const id of restoredIds) {
     const session = ensureSession(id);
+    // Keep startup resilient: restore all sessions even if one fails.
     await initializeSessionIfNeeded(session).catch((error) => {
-      session.lastError = error?.message ?? "Unable to restore session";
-      session.status = "error";
+      session.lastError = error?.message ?? 'Unable to restore session';
+      session.status = 'error';
     });
   }
 }
 
 void restorePersistedSessions().catch((error) => {
-  console.error(
-    "Failed to restore persisted sessions:",
-    error?.message ?? error,
-  );
+  console.error('Failed to restore persisted sessions:', error?.message ?? error);
 });
 
-process.on("SIGINT", async () => {
+process.on('SIGINT', async () => {
   try {
-    const tasks = Array.from(sessions.values()).map((session) =>
-      session.client.destroy().catch(() => undefined),
-    );
+    const tasks = Array.from(sessions.values()).map(session => session.client.destroy().catch(() => undefined));
     await Promise.all(tasks);
   } finally {
     process.exit(0);

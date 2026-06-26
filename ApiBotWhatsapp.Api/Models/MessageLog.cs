@@ -23,6 +23,7 @@ public class MessageLog
     [MaxLength(4000)]
     public string Content { get; set; } = string.Empty;
 
+    public string? ContactName { get; set; }
     public bool IsAutomatic { get; set; }
 
     [MaxLength(120)]
