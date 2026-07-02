@@ -152,3 +152,18 @@ export type Contato = {
   turmaId: number | null
   isActive: boolean
 }
+
+export type BulkSendStreamEvent = {
+  type: 'sending' | 'result' | 'completed' | 'aborted'
+  contactId: number | null
+  phoneNumber: string | null
+  success: boolean | null
+  status: string | null
+  sentCount: number
+  failedCount: number
+  remainingCount: number
+  totalCount: number
+  completed: boolean
+  aborted: boolean
+  abortReason: string | null
+}

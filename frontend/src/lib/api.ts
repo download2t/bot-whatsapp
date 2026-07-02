@@ -4,6 +4,12 @@ function getToken(): string | null {
   return localStorage.getItem('bot_jwt')
 }
 
+export function getAuthHeaders(): Record<string, string> {
+  const token = getToken()
+
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken()
 
