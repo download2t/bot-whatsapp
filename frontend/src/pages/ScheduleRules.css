@@ -329,6 +329,235 @@
   margin-bottom: 2rem;
 }
 
+.schedule-rule-page {
+  min-height: 100vh;
+  max-width: 1360px;
+  padding-top: 2rem;
+  padding-bottom: 3rem;
+  background:
+    radial-gradient(circle at top left, rgba(102, 126, 234, 0.12), transparent 34%),
+    radial-gradient(circle at top right, rgba(16, 185, 129, 0.10), transparent 28%),
+    linear-gradient(180deg, #f8faff 0%, #f4f7fb 100%);
+}
+
+.schedule-rule-page .form-header {
+  position: relative;
+  overflow: hidden;
+  padding: 1.75rem 2rem;
+  margin-bottom: 1.5rem;
+  background: linear-gradient(135deg, #ffffff 0%, #f6f8ff 100%);
+  border: 1px solid rgba(102, 126, 234, 0.12);
+  border-radius: 18px;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
+}
+
+.schedule-rule-page .form-header::after {
+  content: '';
+  position: absolute;
+  inset: auto -80px -80px auto;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(102, 126, 234, 0.16), transparent 68%);
+  pointer-events: none;
+}
+
+.schedule-rule-page .form-header h1 {
+  font-size: 2rem;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+}
+
+.schedule-rule-page .form-subtitle {
+  max-width: 720px;
+  color: #52607a;
+  font-size: 1rem;
+}
+
+.schedule-rule-page .schedule-form {
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.schedule-rule-page .form-section,
+.schedule-rule-page .rule-preview,
+.schedule-rule-page .form-actions {
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: 0 10px 32px rgba(15, 23, 42, 0.06);
+}
+
+.schedule-rule-page .form-section {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(6px);
+  margin-bottom: 1.25rem;
+}
+
+.schedule-rule-page .form-section legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.5rem;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+
+.schedule-rule-page .form-section legend::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #667eea, #22c55e);
+  box-shadow: 0 0 0 6px rgba(102, 126, 234, 0.08);
+}
+
+.schedule-rule-page .form-group label,
+.schedule-rule-page .form-checkbox label,
+.schedule-rule-page .info-box strong,
+.schedule-rule-page .examples strong,
+.schedule-rule-page .rule-preview h3 {
+  color: #0f172a;
+}
+
+.schedule-rule-page .form-group input[type="text"],
+.schedule-rule-page .form-group input[type="number"],
+.schedule-rule-page .form-group input[type="time"],
+.schedule-rule-page .form-group textarea,
+.schedule-rule-page .form-group select {
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  border-color: #d9e0ee;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+.schedule-rule-page .form-group input[type="text"]:focus,
+.schedule-rule-page .form-group input[type="number"]:focus,
+.schedule-rule-page .form-group input[type="time"]:focus,
+.schedule-rule-page .form-group textarea:focus,
+.schedule-rule-page .form-group select:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.12);
+}
+
+.schedule-rule-page .checkbox-number-list {
+  background: linear-gradient(180deg, #fbfcff 0%, #f6f8ff 100%);
+  border-color: #dae2f2;
+  padding: 1rem;
+}
+
+.schedule-rule-page .checkbox-number-item {
+  border-color: #d6ddeb;
+  border-radius: 12px;
+  padding: 0.7rem 0.85rem;
+}
+
+.schedule-rule-page .checkbox-number-item.selected {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.12), rgba(34, 197, 94, 0.08));
+  box-shadow: 0 6px 18px rgba(102, 126, 234, 0.12);
+}
+
+.schedule-rule-page .form-checkbox {
+  padding: 0.9rem 1rem;
+  background: #fbfcff;
+  border: 1px solid #e3eaf6;
+  border-radius: 14px;
+}
+
+.schedule-rule-page .info-box {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.10), rgba(255, 255, 255, 0.96));
+  border: 1px solid rgba(102, 126, 234, 0.18);
+  border-left-width: 4px;
+}
+
+.schedule-rule-page .examples {
+  background: linear-gradient(135deg, #f7fafc 0%, #eef2ff 100%);
+  border: 1px solid #e2e8f0;
+}
+
+.schedule-rule-page .rule-preview {
+  margin-left: 0;
+  margin-right: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 250, 252, 0.98) 100%);
+}
+
+.schedule-rule-page .preview-content {
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  border: 1px solid #e1e8f2;
+  border-left-width: 4px;
+}
+
+.schedule-rule-page .form-actions {
+  margin-top: 0.5rem;
+  padding: 1.25rem 1.5rem;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(247, 250, 252, 0.96));
+}
+
+.schedule-rule-page .btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #7c3aed 100%);
+}
+
+.schedule-rule-page .btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #596fe0 0%, #6d28d9 100%);
+}
+
+.schedule-rule-page .btn-secondary {
+  background: #eef2f7;
+  color: #243244;
+}
+
+.schedule-rule-page .btn-secondary:hover:not(:disabled) {
+  background: #e2e8f0;
+}
+
+.schedule-rule-page .btn-danger {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+}
+
+.schedule-rule-page .rule-preview h3,
+.schedule-rule-page .form-section legend,
+.schedule-rule-page .form-header h1 {
+  text-wrap: balance;
+}
+
+.schedule-window-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 1rem;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+}
+
+.schedule-window-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(120px, 0.9fr) minmax(120px, 0.9fr) auto;
+  gap: 0.85rem;
+  align-items: end;
+}
+
+.schedule-window-field {
+  margin-bottom: 0;
+}
+
+.schedule-window-field label {
+  font-size: 0.84rem;
+}
+
+.schedule-window-field input,
+.schedule-window-field select {
+  min-height: 42px;
+}
+
+.schedule-window-actions {
+  display: flex;
+  align-items: end;
+}
+
+.schedule-window-actions .btn {
+  min-height: 42px;
+  padding-left: 0.9rem;
+  padding-right: 0.9rem;
+}
+
 .form-header h1 {
   margin: 0 0 0.25rem 0;
   color: #1a1a2e;
@@ -621,6 +850,38 @@
 @media (max-width: 768px) {
   .container {
     padding: 1rem;
+  }
+
+  .schedule-rule-page {
+    padding-top: 1rem;
+    padding-bottom: 1.5rem;
+  }
+
+  .schedule-rule-page .form-header {
+    padding: 1.25rem 1rem;
+    border-radius: 16px;
+  }
+
+  .schedule-rule-page .form-header h1 {
+    font-size: 1.6rem;
+  }
+
+  .schedule-rule-page .form-subtitle {
+    font-size: 0.95rem;
+  }
+
+  .schedule-rule-page .form-section,
+  .schedule-rule-page .rule-preview,
+  .schedule-rule-page .form-actions {
+    border-radius: 14px;
+  }
+
+  .schedule-window-row {
+    grid-template-columns: 1fr;
+  }
+
+  .schedule-window-actions .btn {
+    width: 100%;
   }
 
   .rules-header {

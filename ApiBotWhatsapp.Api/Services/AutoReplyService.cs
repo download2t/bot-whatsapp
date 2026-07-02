@@ -4,6 +4,8 @@ using ApiBotWhatsapp.Api.Models;
 using ApiBotWhatsapp.Api.Utils;
 using Microsoft.EntityFrameworkCore;
 using System.Collections.Concurrent;
+using System.Globalization;
+using System.Text.Json;
 
 namespace ApiBotWhatsapp.Api.Services;
 
@@ -11,6 +13,10 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
 {
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> PhoneLocks = new();
     private static readonly TimeSpan MaxIncomingMessageAge = TimeSpan.FromMinutes(5);
+    private static readonly JsonSerializerOptions WindowsJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
 
     public async Task<WhatsAppWebhookResponse> ProcessIncomingMessageAsync(WhatsAppWebhookRequest request, CancellationToken cancellationToken)
     {
@@ -88,7 +94,7 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
                 return new WhatsAppWebhookResponse(false, $"Incoming message is older than {MaxIncomingMessageAge.TotalMinutes:0} minutes. Auto reply skipped.", null);
             }
 
-            var currentTime = GetCurrentRuleTime(configuration["WhatsApp:TimeZoneId"]);
+            var currentTime = GetCurrentBrasiliaTime(configuration["WhatsApp:TimeZoneId"]);
             var matchedRule = await dbContext.ScheduleRules
                 .Where(rule => rule.CompanyId == company.Id && rule.IsEnabled)
                 .Where(rule =>
@@ -152,18 +158,19 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
         }
     }
 
-    private static bool IsRuleActive(TimeSpan currentTime, ScheduleRule rule)
+    private static bool IsRuleActive(DateTime currentTime, ScheduleRule rule)
     {
+        var windows = GetRuleWindows(rule);
+        var isWithinConfiguredWindow = IsWithinConfiguredWindow(currentTime, windows);
+
         if (rule.IsOutOfBusinessHours)
         {
-            // Inverted logic: active OUTSIDE the time range
-            return !IsWithinRange(currentTime, rule.StartTime, rule.EndTime);
+            // Inverted logic: active OUTSIDE all configured windows for the current day
+            return !isWithinConfiguredWindow;
         }
-        else
-        {
-            // Normal logic: active WITHIN the time range
-            return IsWithinRange(currentTime, rule.StartTime, rule.EndTime);
-        }
+
+        // Normal logic: active WITHIN one of the configured windows for the current day
+        return isWithinConfiguredWindow;
     }
 
     private static bool IsWithinRange(TimeSpan now, TimeSpan start, TimeSpan end)
@@ -174,6 +181,43 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
         }
 
         return now >= start || now < end;
+    }
+
+    private static bool IsWithinConfiguredWindow(DateTime currentTime, IEnumerable<ScheduleRuleTimeWindowRequest> windows)
+    {
+        var currentDay = (int)currentTime.DayOfWeek;
+        var previousDay = currentDay == 0 ? 6 : currentDay - 1;
+        var currentTimeOfDay = currentTime.TimeOfDay;
+
+        foreach (var window in windows)
+        {
+            if (!TryParseTime(window.StartTime, out var startTime) || !TryParseTime(window.EndTime, out var endTime))
+            {
+                continue;
+            }
+
+            if (startTime <= endTime)
+            {
+                if (window.DayOfWeek == currentDay && IsWithinRange(currentTimeOfDay, startTime, endTime))
+                {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (window.DayOfWeek == currentDay && currentTimeOfDay >= startTime)
+            {
+                return true;
+            }
+
+            if (window.DayOfWeek == previousDay && currentTimeOfDay < endTime)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async Task<TimeSpan?> GetTimeSinceLastAutomaticMessageAsync(int companyId, string phoneNumber, string whatsAppNumber, DateTime nowReference, CancellationToken cancellationToken)
@@ -209,26 +253,45 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
                 cancellationToken);
     }
 
-    private static TimeSpan GetCurrentRuleTime(string? configuredTimeZoneId)
+    private static bool TryParseTime(string input, out TimeSpan value)
     {
-        configuredTimeZoneId = string.IsNullOrWhiteSpace(configuredTimeZoneId)
-            ? "E. South America Standard Time"
-            : configuredTimeZoneId;
+        return TimeSpan.TryParseExact(input, @"hh\:mm", CultureInfo.InvariantCulture, out value);
+    }
 
-        try
+    private static List<ScheduleRuleTimeWindowRequest> GetLegacyWindows(ScheduleRule rule)
+    {
+        var start = rule.StartTime.ToString(@"hh\:mm");
+        var end = rule.EndTime.ToString(@"hh\:mm");
+
+        return Enumerable.Range(0, 7)
+            .Select(day => new ScheduleRuleTimeWindowRequest(day, start, end))
+            .ToList();
+    }
+
+    private static List<ScheduleRuleTimeWindowRequest> GetRuleWindows(ScheduleRule rule)
+    {
+        if (!string.IsNullOrWhiteSpace(rule.ScheduleWindowsJson))
         {
-            var timezone = TimeZoneInfo.FindSystemTimeZoneById(configuredTimeZoneId);
-            var localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, timezone);
-            return localNow.TimeOfDay;
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<List<ScheduleRuleTimeWindowRequest>>(rule.ScheduleWindowsJson, WindowsJsonOptions);
+                if (parsed is { Count: > 0 })
+                {
+                    return parsed
+                        .Where(window => Enum.IsDefined(typeof(DayOfWeek), window.DayOfWeek))
+                        .Where(window => TryParseTime(window.StartTime, out _) && TryParseTime(window.EndTime, out _))
+                        .OrderBy(window => window.DayOfWeek)
+                        .ThenBy(window => window.StartTime)
+                        .ToList();
+                }
+            }
+            catch
+            {
+                // Ignore malformed JSON and fall back to legacy fields.
+            }
         }
-        catch (TimeZoneNotFoundException)
-        {
-            return DateTime.Now.TimeOfDay;
-        }
-        catch (InvalidTimeZoneException)
-        {
-            return DateTime.Now.TimeOfDay;
-        }
+
+        return GetLegacyWindows(rule);
     }
 
     private static DateTime GetCurrentBrasiliaTime(string? configuredTimeZoneId)
@@ -240,8 +303,8 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
         try
         {
             var timezone = TimeZoneInfo.FindSystemTimeZoneById(configuredTimeZoneId);
-            var brasiliaTime = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, timezone);
-            return brasiliaTime;
+            var localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, timezone);
+            return localNow;
         }
         catch (TimeZoneNotFoundException)
         {

@@ -1,5 +1,9 @@
 namespace ApiBotWhatsapp.Api.Dtos;
 
+public record ScheduleRuleTimeWindowRequest(int DayOfWeek, string StartTime, string EndTime);
+
+public record ScheduleRuleTimeWindowResponse(int DayOfWeek, string DayName, string StartTime, string EndTime);
+
 public record ScheduleRuleRequest(
     string Name,
     IReadOnlyList<string>? WhatsAppNumbers,
@@ -10,7 +14,8 @@ public record ScheduleRuleRequest(
     bool IsEnabled,
     int ThrottleMinutes = 0,
     bool IsOutOfBusinessHours = false,
-    int? MaxDailyMessagesPerUser = null);
+    int? MaxDailyMessagesPerUser = null,
+    IReadOnlyList<ScheduleRuleTimeWindowRequest>? Windows = null);
 
 public record ScheduleRuleResponse(
     int Id,
@@ -24,4 +29,5 @@ public record ScheduleRuleResponse(
     int ThrottleMinutes,
     bool IsOutOfBusinessHours,
     int? MaxDailyMessagesPerUser,
-    DateTime CreatedAtUtc);
+    DateTime CreatedAtUtc,
+    IReadOnlyList<ScheduleRuleTimeWindowResponse> Windows);

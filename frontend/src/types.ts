@@ -25,12 +25,20 @@ export type ScheduleRule = {
   whatsAppNumber: string
   startTime: string
   endTime: string
+  windows: ScheduleRuleWindow[]
   message: string
   isEnabled: boolean
   throttleMinutes: number
   isOutOfBusinessHours: boolean
   maxDailyMessagesPerUser: number | null
   createdAtUtc: string
+}
+
+export type ScheduleRuleWindow = {
+  dayOfWeek: number
+  dayName: string
+  startTime: string
+  endTime: string
 }
 
 export type WhitelistItem = {

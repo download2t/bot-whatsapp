@@ -1,15 +1,61 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
-import type { ScheduleRule, WhatsAppFilterOptions } from '../types'
+import type { ScheduleRule, ScheduleRuleWindow, WhatsAppFilterOptions } from '../types'
 import './ScheduleRules.css'
 
-type FormData = Omit<ScheduleRule, 'id' | 'createdAtUtc'>
+type WindowForm = {
+  dayOfWeek: number
+  startTime: string
+  endTime: string
+}
+
+type FormData = {
+  name: string
+  whatsAppNumbers: string[]
+  whatsAppNumber: string
+  startTime: string
+  endTime: string
+  windows: WindowForm[]
+  message: string
+  isEnabled: boolean
+  throttleMinutes: number
+  isOutOfBusinessHours: boolean
+  maxDailyMessagesPerUser: number | null
+}
+
+const DAY_OPTIONS = [
+  { value: 0, label: 'Domingo' },
+  { value: 1, label: 'Segunda' },
+  { value: 2, label: 'Terça' },
+  { value: 3, label: 'Quarta' },
+  { value: 4, label: 'Quinta' },
+  { value: 5, label: 'Sexta' },
+  { value: 6, label: 'Sábado' },
+]
+
+const DEFAULT_WINDOW: WindowForm = {
+  dayOfWeek: 1,
+  startTime: '08:00',
+  endTime: '17:00'
+}
+
+function formatDay(dayOfWeek: number): string {
+  return DAY_OPTIONS.find(option => option.value === dayOfWeek)?.label ?? `Dia ${dayOfWeek}`
+}
+
+function toWindowForm(window: ScheduleRuleWindow): WindowForm {
+  return {
+    dayOfWeek: window.dayOfWeek,
+    startTime: window.startTime,
+    endTime: window.endTime,
+  }
+}
 
 export function ScheduleRuleForm() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const [loading, setLoading] = useState(id ? true : false)
+  const [loading, setLoading] = useState(Boolean(id))
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [whatsAppOptions, setWhatsAppOptions] = useState<string[]>([])
@@ -18,12 +64,13 @@ export function ScheduleRuleForm() {
     whatsAppNumbers: [],
     whatsAppNumber: '',
     startTime: '08:00',
-    endTime: '10:00',
+    endTime: '17:00',
+    windows: [DEFAULT_WINDOW],
     message: '',
     isEnabled: true,
     throttleMinutes: 0,
     isOutOfBusinessHours: false,
-    maxDailyMessagesPerUser: null
+    maxDailyMessagesPerUser: null,
   })
 
   useEffect(() => {
@@ -40,12 +87,18 @@ export function ScheduleRuleForm() {
 
     if (id) {
       void loadRule()
+    } else {
+      setLoading(false)
     }
   }, [id])
 
   const loadRule = async () => {
     try {
       const rule = await apiFetch<ScheduleRule>(`/api/schedule-rules/${id}`)
+      const windows = rule.windows && rule.windows.length > 0
+        ? rule.windows.map(toWindowForm)
+        : [{ dayOfWeek: 1, startTime: rule.startTime, endTime: rule.endTime }]
+
       setForm({
         name: rule.name,
         whatsAppNumbers: (rule.whatsAppNumbers && rule.whatsAppNumbers.length > 0)
@@ -54,11 +107,12 @@ export function ScheduleRuleForm() {
         whatsAppNumber: rule.whatsAppNumber,
         startTime: rule.startTime,
         endTime: rule.endTime,
+        windows,
         message: rule.message,
         isEnabled: rule.isEnabled,
         throttleMinutes: rule.throttleMinutes,
         isOutOfBusinessHours: rule.isOutOfBusinessHours,
-        maxDailyMessagesPerUser: rule.maxDailyMessagesPerUser
+        maxDailyMessagesPerUser: rule.maxDailyMessagesPerUser,
       })
       setError(null)
     } catch (err) {
@@ -79,7 +133,7 @@ export function ScheduleRuleForm() {
         ? checked
         : type === 'number'
           ? (value === '' ? null : parseInt(value, 10))
-          : value
+          : value,
     }))
   }
 
@@ -92,26 +146,75 @@ export function ScheduleRuleForm() {
       return {
         ...prev,
         whatsAppNumbers: nextNumbers,
-        whatsAppNumber: nextNumbers[0] || ''
+        whatsAppNumber: nextNumbers[0] || '',
       }
     })
   }
+
+  const handleWindowChange = (index: number, field: keyof WindowForm, value: string | number) => {
+    setForm(prev => {
+      const nextWindows = [...prev.windows]
+      nextWindows[index] = {
+        ...nextWindows[index],
+        [field]: field === 'dayOfWeek' ? Number(value) : value,
+      }
+
+      return {
+        ...prev,
+        windows: nextWindows,
+      }
+    })
+  }
+
+  const addWindow = () => {
+    setForm(prev => ({
+      ...prev,
+      windows: [...prev.windows, { ...DEFAULT_WINDOW }],
+    }))
+  }
+
+  const removeWindow = (index: number) => {
+    setForm(prev => ({
+      ...prev,
+      windows: prev.windows.length > 1
+        ? prev.windows.filter((_, currentIndex) => currentIndex !== index)
+        : prev.windows,
+    }))
+  }
+
+  const windowsSummary = useMemo(() => {
+    if (form.windows.length === 0) {
+      return 'Nenhuma janela configurada'
+    }
+
+    return form.windows
+      .map(window => `${formatDay(window.dayOfWeek)} ${window.startTime} - ${window.endTime}`)
+      .join(' | ')
+  }, [form.windows])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
 
-    if (!form.name.trim() || !form.message.trim() || form.whatsAppNumbers.length === 0) {
-      setError('Nome, pelo menos um numero WhatsApp e mensagem são obrigatórios')
+    if (!form.name.trim() || !form.message.trim() || form.whatsAppNumbers.length === 0 || form.windows.length === 0) {
+      setError('Nome, pelo menos um numero WhatsApp, mensagem e uma janela de horário são obrigatórios')
       setSubmitting(false)
       return
     }
 
     const payload = {
-      ...form,
+      name: form.name.trim(),
       whatsAppNumbers: form.whatsAppNumbers,
-      whatsAppNumber: form.whatsAppNumbers[0] || ''
+      whatsAppNumber: form.whatsAppNumbers[0] || '',
+      startTime: form.windows[0]?.startTime || form.startTime,
+      endTime: form.windows[0]?.endTime || form.endTime,
+      windows: form.windows,
+      message: form.message,
+      isEnabled: form.isEnabled,
+      throttleMinutes: form.throttleMinutes,
+      isOutOfBusinessHours: form.isOutOfBusinessHours,
+      maxDailyMessagesPerUser: form.maxDailyMessagesPerUser,
     }
 
     try {
@@ -122,7 +225,7 @@ export function ScheduleRuleForm() {
         method,
         body: JSON.stringify(payload)
       })
-      
+
       navigate('/rules')
     } catch (err) {
       console.error('Erro:', err)
@@ -137,7 +240,7 @@ export function ScheduleRuleForm() {
   const isEdit = !!id
 
   return (
-    <div className="container">
+    <div className="schedule-rule-page container">
       <div className="form-header">
         <h1>{isEdit ? 'Editar Regra' : 'Nova Regra de Agendamento'}</h1>
         <p className="form-subtitle">Configure quando e como as mensagens automáticas serão enviadas</p>
@@ -146,14 +249,13 @@ export function ScheduleRuleForm() {
       {error && <div className="error">{error}</div>}
 
       <form onSubmit={handleSubmit} className="schedule-form">
-        {/* SEÇÃO: INFORMAÇÕES BÁSICAS */}
         <fieldset className="form-section">
           <legend>📋 Informações Básicas</legend>
 
           <div className="form-group">
-            <label htmlFor="whatsAppNumbers">Numeros WhatsApp conectados *</label>
+            <label htmlFor="whatsAppNumbers">Números WhatsApp conectados *</label>
 
-            <div className="checkbox-number-list" id="whatsAppNumbers" role="group" aria-label="Numeros WhatsApp conectados">
+            <div className="checkbox-number-list" id="whatsAppNumbers" role="group" aria-label="Números WhatsApp conectados">
               {whatsAppOptions.length === 0 && (
                 <p className="checkbox-number-empty">Nenhum numero conectado disponivel.</p>
               )}
@@ -177,8 +279,8 @@ export function ScheduleRuleForm() {
             </div>
 
             <small>
-              Selecione um ou mais numeros conectados.
-              {whatsAppOptions.length === 0 ? ' Nenhum numero disponível para seleção.' : ''}
+              Selecione um ou mais números conectados.
+              {whatsAppOptions.length === 0 ? ' Nenhum número disponível para seleção.' : ''}
             </small>
           </div>
 
@@ -223,9 +325,8 @@ export function ScheduleRuleForm() {
           </div>
         </fieldset>
 
-        {/* SEÇÃO: AGENDAMENTO */}
         <fieldset className="form-section">
-          <legend>⏰ Agendamento</legend>
+          <legend>⏰ Agenda Semanal</legend>
 
           <div className="form-checkbox">
             <input
@@ -235,71 +336,93 @@ export function ScheduleRuleForm() {
               checked={form.isOutOfBusinessHours}
               onChange={handleChange}
             />
-            <label htmlFor="isOutOfBusinessHours">
-              🌙 Fora do expediente
-            </label>
-            <small>Se marcado, a regra dispara FORA do horário indicado (ex: 18h-08h)</small>
+            <label htmlFor="isOutOfBusinessHours">🌙 Enviar fora das janelas configuradas</label>
+            <small>
+              Marcado: a regra dispara quando estiver fora dos horários informados. Desmarcado: a regra dispara apenas dentro deles.
+            </small>
           </div>
 
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="startTime">
-                {form.isOutOfBusinessHours ? 'Início da jornada' : 'Início'} *
-              </label>
-              <input
-                type="time"
-                id="startTime"
-                name="startTime"
-                value={form.startTime}
-                onChange={handleChange}
-                required
-              />
-              <small>
-                {form.isOutOfBusinessHours 
-                  ? 'Quando o expediente começa (mensagens disparam antes)'
-                  : 'Hora para iniciar o disparo de mensagens'}
-              </small>
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="endTime">
-                {form.isOutOfBusinessHours ? 'Fim da jornada' : 'Fim'} *
-              </label>
-              <input
-                type="time"
-                id="endTime"
-                name="endTime"
-                value={form.endTime}
-                onChange={handleChange}
-                required
-              />
-              <small>
-                {form.isOutOfBusinessHours 
-                  ? 'Quando o expediente termina (mensagens disparam depois)'
-                  : 'Hora para parar o disparo de mensagens'}
-              </small>
-            </div>
+          <div className="info-box">
+            <strong>Como montar a rotina:</strong>
+            <p>
+              Adicione uma janela para cada dia e horário. Exemplo: segunda 08:00-14:00, terça 09:00-16:00, quarta a sexta 08:00-17:00.
+              Se você marcar a opção de fora das janelas, o bot envia quando estiver fora desses blocos.
+            </p>
           </div>
 
-          {form.isOutOfBusinessHours && (
-            <div className="info-box">
-              <strong>💡 Como funciona:</strong>
-              <p>
-                Se você configurar 08:00-18:00 com "Fora do expediente" marcado,
-                as mensagens serão enviadas de 18:00 até 08:00 (fora da jornada comercial).
-              </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+            <strong>Janelas configuradas</strong>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={addWindow} disabled={submitting}>
+              ➕ Adicionar janela
+            </button>
+          </div>
+
+          <div style={{ display: 'grid', gap: '12px' }}>
+            {form.windows.map((window, index) => (
+              <div key={`${window.dayOfWeek}-${index}`} className="schedule-window-card">
+                <div className="schedule-window-row">
+                  <div className="form-group schedule-window-field">
+                    <label>Dia da semana</label>
+                    <select
+                      value={window.dayOfWeek}
+                      onChange={(event) => handleWindowChange(index, 'dayOfWeek', Number(event.target.value))}
+                      disabled={submitting}
+                    >
+                      {DAY_OPTIONS.map(option => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="form-group schedule-window-field">
+                    <label>Início</label>
+                    <input
+                      type="time"
+                      value={window.startTime}
+                      onChange={(event) => handleWindowChange(index, 'startTime', event.target.value)}
+                      disabled={submitting}
+                    />
+                  </div>
+
+                  <div className="form-group schedule-window-field">
+                    <label>Fim</label>
+                    <input
+                      type="time"
+                      value={window.endTime}
+                      onChange={(event) => handleWindowChange(index, 'endTime', event.target.value)}
+                      disabled={submitting}
+                    />
+                  </div>
+
+                  <div className="schedule-window-actions">
+                    <button
+                      type="button"
+                      className="btn btn-danger btn-sm"
+                      onClick={() => removeWindow(index)}
+                      disabled={submitting || form.windows.length === 1}
+                    >
+                      🗑 Remover
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="rule-preview" style={{ marginTop: '16px' }}>
+            <h3>📝 Resumo da rotina</h3>
+            <div className="preview-content">
+              <p><strong>Modo:</strong> {form.isOutOfBusinessHours ? '🌙 Fora das janelas' : '⏰ Dentro das janelas'}</p>
+              <p><strong>Agenda:</strong> {windowsSummary}</p>
             </div>
-          )}
+          </div>
         </fieldset>
 
-        {/* SEÇÃO: CONTROLE DE THROTTLE */}
         <fieldset className="form-section">
           <legend>⏱️ Controle de Frequência</legend>
 
           <div className="form-group">
-            <label htmlFor="throttleMinutes">
-              Intervalo mínimo entre mensagens (minutos)
-            </label>
+            <label htmlFor="throttleMinutes">Intervalo mínimo entre mensagens (minutos)</label>
             <input
               type="number"
               id="throttleMinutes"
@@ -312,29 +435,12 @@ export function ScheduleRuleForm() {
             />
             <small>
               Quanto tempo esperar antes de enviar outra mensagem para o mesmo usuário.
-              Use 0 para "sem restrição" (padrão)
+              Use 0 para "sem restrição".
             </small>
           </div>
 
-          <div className="examples">
-            <strong>Exemplos:</strong>
-            <ul>
-              <li>0 = Sem restrição (enviar sempre que a regra se ativar)</li>
-              <li>30 = Aguardar 30 minutos entre mensagens</li>
-              <li>60 = Máximo 1 mensagem por hora</li>
-              <li>1440 = Máximo 1 mensagem por dia</li>
-            </ul>
-          </div>
-        </fieldset>
-
-        {/* SEÇÃO: LIMITE DIÁRIO */}
-        <fieldset className="form-section">
-          <legend>📊 Limite Diário por Usuário</legend>
-
           <div className="form-group">
-            <label htmlFor="maxDailyMessagesPerUser">
-              Máximo de mensagens por dia
-            </label>
+            <label htmlFor="maxDailyMessagesPerUser">Máximo de mensagens por dia</label>
             <input
               type="number"
               id="maxDailyMessagesPerUser"
@@ -347,30 +453,18 @@ export function ScheduleRuleForm() {
             />
             <small>
               Número máximo de vezes que esta regra enviará mensagem para o mesmo usuário num dia.
-              Deixe em branco para "sem limite"
+              Deixe em branco para "sem limite".
             </small>
-          </div>
-
-          <div className="examples">
-            <strong>Exemplos:</strong>
-            <ul>
-              <li>1 = Máximo 1 mensagem por usuário por dia</li>
-              <li>5 = Até 5 mensagens por usuário por dia</li>
-              <li>Vazio = Sem limite de mensagens diárias</li>
-            </ul>
           </div>
         </fieldset>
 
-        {/* RESUMO DA CONFIGURAÇÃO */}
         <div className="rule-preview">
-          <h3>📝 Resumo da Configuração</h3>
+          <h3>🔎 Resumo completo</h3>
           <div className="preview-content">
             <p><strong>Nome:</strong> {form.name || '(não preenchido)'}</p>
             <p><strong>WhatsApp:</strong> {form.whatsAppNumbers.length > 0 ? form.whatsAppNumbers.join(', ') : '(não preenchido)'}</p>
-            <p>
-              <strong>Horário:</strong> {form.isOutOfBusinessHours ? '🌙 FORA DE' : '⏰'}
-              {form.startTime} até {form.endTime}
-            </p>
+            <p><strong>Modo:</strong> {form.isOutOfBusinessHours ? '🌙 Fora das janelas configuradas' : '⏰ Dentro das janelas configuradas'}</p>
+            <p><strong>Agenda:</strong> {windowsSummary}</p>
             <p><strong>Status:</strong> {form.isEnabled ? '✅ Ativa' : '❌ Inativa'}</p>
             {form.throttleMinutes > 0 && (
               <p><strong>Throttle:</strong> {form.throttleMinutes} minutos entre mensagens</p>
@@ -381,7 +475,6 @@ export function ScheduleRuleForm() {
           </div>
         </div>
 
-        {/* BOTÕES DE AÇÃO */}
         <div className="form-actions">
           <button
             type="submit"

@@ -4,6 +4,8 @@ using ApiBotWhatsapp.Api.Models;
 using ApiBotWhatsapp.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
+using System.Text.Json;
 
 namespace ApiBotWhatsapp.Api.Controllers;
 
@@ -11,10 +13,128 @@ namespace ApiBotWhatsapp.Api.Controllers;
 [Route("api/schedule-rules")]
 public class ScheduleRulesController(AppDbContext dbContext, WhatsAppBridgeClient bridgeClient) : ControllerBase
 {
+    private static readonly JsonSerializerOptions WindowsJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true
+    };
+
+    private static readonly string[] DayNames = [
+        "Domingo",
+        "Segunda-feira",
+        "Terça-feira",
+        "Quarta-feira",
+        "Quinta-feira",
+        "Sexta-feira",
+        "Sábado"
+    ];
+
     private int? GetCurrentCompanyId()
     {
         var claim = User.FindFirst("company_id")?.Value;
         return int.TryParse(claim, out var companyId) ? companyId : null;
+    }
+
+    private static string GetDayName(int dayOfWeek)
+    {
+        return dayOfWeek >= 0 && dayOfWeek < DayNames.Length ? DayNames[dayOfWeek] : dayOfWeek.ToString(CultureInfo.InvariantCulture);
+    }
+
+    private static bool TryParseTime(string input, out TimeSpan value)
+    {
+        return TimeSpan.TryParseExact(input, @"hh\:mm", CultureInfo.InvariantCulture, out value);
+    }
+
+    private static bool TryNormalizeWindows(
+        IReadOnlyList<ScheduleRuleTimeWindowRequest>? windows,
+        string fallbackStart,
+        string fallbackEnd,
+        out List<ScheduleRuleTimeWindowRequest> normalized,
+        out string? error)
+    {
+        normalized = [];
+        error = null;
+
+        if (windows is { Count: > 0 })
+        {
+            foreach (var window in windows)
+            {
+                if (!Enum.IsDefined(typeof(DayOfWeek), window.DayOfWeek))
+                {
+                    error = $"Invalid DayOfWeek value: {window.DayOfWeek}.";
+                    return false;
+                }
+
+                if (!TryParseTime(window.StartTime, out _) || !TryParseTime(window.EndTime, out _))
+                {
+                    error = "Weekly windows must use HH:mm time format.";
+                    return false;
+                }
+
+                normalized.Add(new ScheduleRuleTimeWindowRequest(window.DayOfWeek, window.StartTime.Trim(), window.EndTime.Trim()));
+            }
+
+            normalized = normalized
+                .OrderBy(window => window.DayOfWeek)
+                .ThenBy(window => window.StartTime)
+                .ToList();
+
+            return true;
+        }
+
+        if (!TryParseTime(fallbackStart, out _) || !TryParseTime(fallbackEnd, out _))
+        {
+            error = "StartTime and EndTime must be in HH:mm format.";
+            return false;
+        }
+
+        var legacyStart = fallbackStart.Trim();
+        var legacyEnd = fallbackEnd.Trim();
+        normalized = Enumerable.Range(0, 7)
+            .Select(day => new ScheduleRuleTimeWindowRequest(day, legacyStart, legacyEnd))
+            .ToList();
+
+        return true;
+    }
+
+    private static List<ScheduleRuleTimeWindowRequest> GetLegacyWindows(ScheduleRule rule)
+    {
+        var start = rule.StartTime.ToString(@"hh\:mm");
+        var end = rule.EndTime.ToString(@"hh\:mm");
+        return Enumerable.Range(0, 7)
+            .Select(day => new ScheduleRuleTimeWindowRequest(day, start, end))
+            .ToList();
+    }
+
+    private static List<ScheduleRuleTimeWindowRequest> GetRuleWindows(ScheduleRule rule)
+    {
+        if (!string.IsNullOrWhiteSpace(rule.ScheduleWindowsJson))
+        {
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<List<ScheduleRuleTimeWindowRequest>>(rule.ScheduleWindowsJson, WindowsJsonOptions);
+                if (parsed is { Count: > 0 })
+                {
+                    return parsed
+                        .Where(window => Enum.IsDefined(typeof(DayOfWeek), window.DayOfWeek))
+                        .Where(window => TryParseTime(window.StartTime, out _) && TryParseTime(window.EndTime, out _))
+                        .OrderBy(window => window.DayOfWeek)
+                        .ThenBy(window => window.StartTime)
+                        .ToList();
+                }
+            }
+            catch
+            {
+                // Fall back to the legacy fields below.
+            }
+        }
+
+        return GetLegacyWindows(rule);
+    }
+
+    private static string SerializeWindows(IEnumerable<ScheduleRuleTimeWindowRequest> windows)
+    {
+        return JsonSerializer.Serialize(windows, WindowsJsonOptions);
     }
 
     private async Task<bool> IsUserGestorOfCompanyAsync(int companyId, CancellationToken cancellationToken)
@@ -112,9 +232,9 @@ public class ScheduleRulesController(AppDbContext dbContext, WhatsAppBridgeClien
             return Forbid("Only administrators and gestores can create schedule rules.");
         }
 
-        if (!TryParseTime(request.StartTime, out var startTime) || !TryParseTime(request.EndTime, out var endTime))
+        if (!TryNormalizeWindows(request.Windows, request.StartTime, request.EndTime, out var normalizedWindows, out var windowError))
         {
-            return BadRequest("StartTime and EndTime must be in HH:mm format.");
+            return BadRequest(windowError);
         }
 
         var normalizedWhatsApps = NormalizeWhatsAppNumbers(request.WhatsAppNumbers, request.WhatsAppNumber);
@@ -128,8 +248,9 @@ public class ScheduleRulesController(AppDbContext dbContext, WhatsAppBridgeClien
             CompanyId = companyId.Value,
             Name = request.Name.Trim(),
             WhatsAppNumber = normalizedWhatsApps[0],
-            StartTime = startTime,
-            EndTime = endTime,
+            StartTime = TimeSpan.ParseExact(normalizedWindows[0].StartTime, @"hh\:mm", CultureInfo.InvariantCulture),
+            EndTime = TimeSpan.ParseExact(normalizedWindows[0].EndTime, @"hh\:mm", CultureInfo.InvariantCulture),
+            ScheduleWindowsJson = SerializeWindows(normalizedWindows),
             Message = request.Message.Trim(),
             IsEnabled = request.IsEnabled,
             ThrottleMinutes = request.ThrottleMinutes,
@@ -178,9 +299,9 @@ public class ScheduleRulesController(AppDbContext dbContext, WhatsAppBridgeClien
             return NotFound();
         }
 
-        if (!TryParseTime(request.StartTime, out var startTime) || !TryParseTime(request.EndTime, out var endTime))
+        if (!TryNormalizeWindows(request.Windows, request.StartTime, request.EndTime, out var normalizedWindows, out var windowError))
         {
-            return BadRequest("StartTime and EndTime must be in HH:mm format.");
+            return BadRequest(windowError);
         }
 
         var normalizedWhatsApps = NormalizeWhatsAppNumbers(request.WhatsAppNumbers, request.WhatsAppNumber);
@@ -191,8 +312,9 @@ public class ScheduleRulesController(AppDbContext dbContext, WhatsAppBridgeClien
 
         rule.Name = request.Name.Trim();
         rule.WhatsAppNumber = normalizedWhatsApps[0];
-        rule.StartTime = startTime;
-        rule.EndTime = endTime;
+        rule.StartTime = TimeSpan.ParseExact(normalizedWindows[0].StartTime, @"hh\:mm", CultureInfo.InvariantCulture);
+        rule.EndTime = TimeSpan.ParseExact(normalizedWindows[0].EndTime, @"hh\:mm", CultureInfo.InvariantCulture);
+        rule.ScheduleWindowsJson = SerializeWindows(normalizedWindows);
         rule.Message = request.Message.Trim();
         rule.IsEnabled = request.IsEnabled;
         rule.ThrottleMinutes = request.ThrottleMinutes;
@@ -287,11 +409,6 @@ public class ScheduleRulesController(AppDbContext dbContext, WhatsAppBridgeClien
         return Ok(new WhatsAppFilterOptionsResponse(numbers, null));
     }
 
-    private static bool TryParseTime(string input, out TimeSpan value)
-    {
-        return TimeSpan.TryParseExact(input, "hh\\:mm", null, out value);
-    }
-
     private async Task<List<ScheduleRuleResponse>> BuildResponsesAsync(List<ScheduleRule> rules, CancellationToken cancellationToken)
     {
         var ids = rules.Select(item => item.Id).ToList();
@@ -312,19 +429,28 @@ public class ScheduleRulesController(AppDbContext dbContext, WhatsAppBridgeClien
                 ? mapped
                 : [rule.WhatsAppNumber];
 
+            var windows = GetRuleWindows(rule)
+                .Select(window => new ScheduleRuleTimeWindowResponse(
+                    window.DayOfWeek,
+                    GetDayName(window.DayOfWeek),
+                    window.StartTime,
+                    window.EndTime))
+                .ToList();
+
             responses.Add(new ScheduleRuleResponse(
                 rule.Id,
                 rule.Name,
                 numbers,
                 numbers.FirstOrDefault() ?? rule.WhatsAppNumber,
-                rule.StartTime.ToString(@"hh\:mm"),
-                rule.EndTime.ToString(@"hh\:mm"),
+                windows.FirstOrDefault()?.StartTime ?? rule.StartTime.ToString(@"hh\:mm"),
+                windows.FirstOrDefault()?.EndTime ?? rule.EndTime.ToString(@"hh\:mm"),
                 rule.Message,
                 rule.IsEnabled,
                 rule.ThrottleMinutes,
                 rule.IsOutOfBusinessHours,
                 rule.MaxDailyMessagesPerUser,
-                rule.CreatedAtUtc));
+                rule.CreatedAtUtc,
+                windows));
         }
 
         return responses;

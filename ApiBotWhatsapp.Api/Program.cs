@@ -274,6 +274,11 @@ static async Task EnsureScheduleRuleColumnsAsync(AppDbContext dbContext)
         ddl.Add("ALTER TABLE ScheduleRules ADD COLUMN MaxDailyMessagesPerUser INTEGER NULL;");
     }
 
+    if (!existingColumns.Contains("ScheduleWindowsJson"))
+    {
+        ddl.Add("ALTER TABLE ScheduleRules ADD COLUMN ScheduleWindowsJson TEXT NOT NULL DEFAULT '[]';");
+    }
+
     var whitelistColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     await using (var whitelistCmd = connection.CreateCommand())
     {

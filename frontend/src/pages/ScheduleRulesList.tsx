@@ -4,6 +4,26 @@ import { apiFetch } from '../lib/api'
 import type { ScheduleRule, WhatsAppFilterOptions } from '../types'
 import './ScheduleRules.css'
 
+const DAY_LABELS = [
+  'Dom',
+  'Seg',
+  'Ter',
+  'Qua',
+  'Qui',
+  'Sex',
+  'Sáb',
+]
+
+function formatWindowSummary(rule: ScheduleRule): string {
+  if (rule.windows && rule.windows.length > 0) {
+    return rule.windows
+      .map(window => `${DAY_LABELS[window.dayOfWeek] || window.dayName} ${window.startTime}-${window.endTime}`)
+      .join(' • ')
+  }
+
+  return `${rule.startTime} até ${rule.endTime}`
+}
+
 export function ScheduleRulesList() {
   const [rules, setRules] = useState<ScheduleRule[]>([])
   const [loading, setLoading] = useState(true)
@@ -67,6 +87,7 @@ export function ScheduleRulesList() {
           whatsAppNumbers: updated.whatsAppNumbers,
           startTime: updated.startTime,
           endTime: updated.endTime,
+            windows: updated.windows,
           message: updated.message,
           isEnabled: updated.isEnabled,
           throttleMinutes: updated.throttleMinutes,
@@ -119,7 +140,7 @@ export function ScheduleRulesList() {
                 <div className="rule-title">
                   <h3>{rule.name}</h3>
                   <div className="rule-time">
-                    {rule.isOutOfBusinessHours ? '🕐 Fora de:' : '⏰ De:'} {rule.startTime} até {rule.endTime}
+                    {rule.isOutOfBusinessHours ? '🕐 Fora das janelas:' : '⏰ Dentro das janelas:'} {formatWindowSummary(rule)}
                   </div>
                   <div className="rule-time">📱 WhatsApp: {(rule.whatsAppNumbers && rule.whatsAppNumbers.length > 0) ? rule.whatsAppNumbers.join(', ') : (rule.whatsAppNumber || '-')}</div>
                 </div>
@@ -146,9 +167,7 @@ export function ScheduleRulesList() {
                 {rule.maxDailyMessagesPerUser && (
                   <span className="config-badge">📊 Max {rule.maxDailyMessagesPerUser}/dia</span>
                 )}
-                {rule.isOutOfBusinessHours && (
-                  <span className="config-badge">🌙 Fora do expediente</span>
-                )}
+                <span className="config-badge">{rule.isOutOfBusinessHours ? '🌙 Fora das janelas' : '⏰ Dentro das janelas'}</span>
               </div>
 
               <div className="rule-actions">

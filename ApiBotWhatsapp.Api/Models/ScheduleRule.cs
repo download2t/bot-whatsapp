@@ -20,6 +20,9 @@ public class ScheduleRule
     public TimeSpan EndTime { get; set; }
 
     [Required]
+    public string ScheduleWindowsJson { get; set; } = "[]";
+
+    [Required]
     [MaxLength(500)]
     public string Message { get; set; } = string.Empty;
 
