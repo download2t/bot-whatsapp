@@ -80,7 +80,7 @@ export function ContatosList() {
       <div style={{ marginBottom: '24px' }}>
         <h1>👥 Contatos</h1>
         <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-          <button className="btn btn-primary" onClick={() => navigate('/contatos/new')}>
+          <button className="btn btn-primary" onClick={() => navigate('/contatos/new', { state: { returnSearch: searchParams.toString() } })}>
             ➕ Novo Contato
           </button>
           <button className="btn btn-secondary" onClick={() => navigate('/contatos/import-excel')}>
@@ -180,7 +180,7 @@ export function ContatosList() {
                     </Badge>
                   </td>
                   <td style={{ display: 'flex', gap: '8px' }}>
-                    <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/contatos/${c.id}/edit`)}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/contatos/${c.id}/edit`, { state: { returnSearch: searchParams.toString() } })}>
                       ✏️ Editar
                     </button>
                     <button className="btn btn-danger btn-sm" onClick={() => handleDelete(c.id)}>

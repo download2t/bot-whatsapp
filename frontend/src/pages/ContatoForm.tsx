@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
 import type { Turma } from '../types'
 import { Card, FormGroup, Alert } from '../components/UI'
@@ -8,6 +8,11 @@ import '../styles/modern.css'
 export function ContatoForm() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
+  // Preserva o filtro (turma/status/busca) que estava ativo na lista de Contatos quando o
+  // usuário clicou em Editar/Novo, para voltar exatamente pra mesma visão filtrada.
+  const returnSearch = (location.state as { returnSearch?: string } | null)?.returnSearch
+  const returnPath = returnSearch ? `/contatos?${returnSearch}` : '/contatos'
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [turmaId, setTurmaId] = useState<number | ''>('')
@@ -48,7 +53,7 @@ export function ContatoForm() {
       const payload = { name, phoneNumber: phone, turmaId: turmaId === '' ? null : turmaId, isActive }
       if (id) await apiFetch(`/api/contatos/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
       else await apiFetch('/api/contatos', { method: 'POST', body: JSON.stringify(payload) })
-      navigate('/contatos')
+      navigate(returnPath)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao salvar')
     } finally {
@@ -124,7 +129,7 @@ export function ContatoForm() {
             <button
               className="btn btn-secondary"
               type="button"
-              onClick={() => navigate('/contatos')}
+              onClick={() => navigate(returnPath)}
               style={{ flex: 1 }}
             >
               ❌ Cancelar
