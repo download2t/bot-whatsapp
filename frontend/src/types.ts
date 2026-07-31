@@ -4,29 +4,15 @@ export type LoginResponse = {
   username: string
   isAdmin: boolean
   userTitle: string | null
-  companyId: number | null
-  companyName: string | null
-  companyCode: string | null
-  requiresCompanySelection: boolean
-  companies: CompanyOption[]
-}
-
-export type CompanyOption = {
-  companyId: number
-  companyName: string
-  companyCode: string
-  isCurrent: boolean
 }
 
 export type ScheduleRule = {
   id: number
   name: string
-  whatsAppNumbers: string[]
-  whatsAppNumber: string
   startTime: string
   endTime: string
   windows: ScheduleRuleWindow[]
-  message: string
+  messages: ScheduleRuleMessage[]
   isEnabled: boolean
   throttleMinutes: number
   isOutOfBusinessHours: boolean
@@ -41,16 +27,14 @@ export type ScheduleRuleWindow = {
   endTime: string
 }
 
-export type WhitelistItem = {
-  id: number
-  name: string | null
-  phoneNumber: string
-  createdAtUtc: string
+export type ScheduleRuleMessage = {
+  text: string
+  days: number[]
+  dayNames: string[]
 }
 
 export type MessageLog = {
   id: number;
-  companyId: number;
   whatsAppNumber: string;
   direction: string;
   phoneNumber: string;
@@ -59,6 +43,10 @@ export type MessageLog = {
   isAutomatic: boolean;
   status: string;
   timestampUtc: string;
+  mediaUrl?: string | null;
+  mediaMimeType?: string | null;
+  mediaFileName?: string | null;
+  ackStatus?: string | null;
 };
 
 export type PagedMessageLog = {
@@ -104,47 +92,8 @@ export type UserListItem = {
   createdAtUtc: string
 }
 
-export type CompanyListItem = {
-  id: number
-  name: string
-  companyCode: string
-  createdAtUtc: string
-  usersCount: number
-}
-
-export type CompanyUserItem = {
-  userId: number
-  username: string
-  isAdmin: boolean
-  email?: string | null
-  fullName?: string | null
-}
-
-export type CompanyUserOption = {
-  userId: number
-  username: string
-  isAdmin: boolean
-  email?: string | null
-  fullName?: string | null
-  isLinked: boolean
-}
-
-export type WhatsAppConnectionItem = {
-  id: string
-  status: string
-  isConnected: boolean
-  hasQr: boolean
-  phoneNumber: string | null
-  lastError: string | null
-}
-
 export type WhatsAppPairingCodeResponse = {
   pairingCode: string | null
-}
-
-export type WhatsAppFilterOptions = {
-  numbers: string[]
-  fixedNumber: string | null
 }
 
 export type Turma = {

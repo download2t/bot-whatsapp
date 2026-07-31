@@ -1,6 +1,5 @@
 using System.Text;
 using ApiBotWhatsapp.Api.Data;
-using ApiBotWhatsapp.Api.Models;
 using ApiBotWhatsapp.Api.Services;
 using DotNetEnv;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -8,7 +7,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
-using System.Data.Common;
 
 Env.Load();
 
@@ -33,6 +31,7 @@ builder.Services.AddScoped<JwtTokenService>();
 builder.Services.AddScoped<AutoReplyService>();
 builder.Services.AddScoped<WhatsAppMessageSender>();
 builder.Services.AddScoped<WhatsAppBridgeClient>();
+builder.Services.AddScoped<MediaStorageService>();
 
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var signingKey = jwtSection["SigningKey"]
@@ -77,13 +76,8 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    dbContext.Database.EnsureCreated();
-    await EnsureCompanyAndTenantColumnsAsync(dbContext);
-    await EnsureScheduleRuleColumnsAsync(dbContext);
-    await EnsureUserColumnsAsync(dbContext);
-    await EnsureContatosAndTurmasTablesAsync(dbContext);
+    await dbContext.Database.MigrateAsync();
     await SeedData.InitializeAsync(dbContext);
-    await EnsureSingleTenantDataAsync(dbContext);
 }
 
 if (app.Environment.IsDevelopment())
@@ -95,6 +89,9 @@ if (app.Environment.IsDevelopment())
 app.MapGet("/health", () => Results.Ok(new { ok = true, service = "ApiBotWhatsapp.Api" }))
     .AllowAnonymous();
 
+Directory.CreateDirectory(Path.Combine(app.Environment.ContentRootPath, "wwwroot", "uploads"));
+app.UseStaticFiles();
+
 app.UseCors("frontend");
 
 app.UseAuthentication();
@@ -103,304 +100,3 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
-
-static async Task EnsureCompanyAndTenantColumnsAsync(AppDbContext dbContext)
-{
-    await dbContext.Database.ExecuteSqlRawAsync(@"
-CREATE TABLE IF NOT EXISTS Companies (
-    Id INTEGER NOT NULL CONSTRAINT PK_Companies PRIMARY KEY AUTOINCREMENT,
-    Name TEXT NOT NULL,
-    UniqueCode TEXT NOT NULL,
-    CreatedAtUtc TEXT NOT NULL
-);");
-
-    await dbContext.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Companies_UniqueCode ON Companies(UniqueCode);");
-    await dbContext.Database.ExecuteSqlRawAsync(@"
-CREATE TABLE IF NOT EXISTS UserCompanies (
-    UserId INTEGER NOT NULL,
-    CompanyId INTEGER NOT NULL,
-    AssignedAtUtc TEXT NOT NULL,
-    CONSTRAINT PK_UserCompanies PRIMARY KEY (UserId, CompanyId)
-);");
-    await dbContext.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_UserCompanies_CompanyId ON UserCompanies(CompanyId);");
-    await dbContext.Database.ExecuteSqlRawAsync(@"
-CREATE TABLE IF NOT EXISTS ScheduleRuleWhatsAppNumbers (
-    ScheduleRuleId INTEGER NOT NULL,
-    WhatsAppNumber TEXT NOT NULL,
-    CONSTRAINT PK_ScheduleRuleWhatsAppNumbers PRIMARY KEY (ScheduleRuleId, WhatsAppNumber)
-);");
-    await dbContext.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_ScheduleRuleWhatsAppNumbers_WhatsAppNumber ON ScheduleRuleWhatsAppNumbers(WhatsAppNumber);");
-
-    var connection = dbContext.Database.GetDbConnection();
-    if (connection.State != System.Data.ConnectionState.Open)
-    {
-        await connection.OpenAsync();
-    }
-
-    var userColumns = await GetTableColumnsAsync(connection, "Users");
-    if (!userColumns.Contains("CompanyId"))
-    {
-        await dbContext.Database.ExecuteSqlRawAsync("ALTER TABLE Users ADD COLUMN CompanyId INTEGER NOT NULL DEFAULT 0;");
-    }
-
-    var ruleColumns = await GetTableColumnsAsync(connection, "ScheduleRules");
-    if (!ruleColumns.Contains("CompanyId"))
-    {
-        await dbContext.Database.ExecuteSqlRawAsync("ALTER TABLE ScheduleRules ADD COLUMN CompanyId INTEGER NOT NULL DEFAULT 0;");
-    }
-
-    if (!ruleColumns.Contains("WhatsAppNumber"))
-    {
-        await dbContext.Database.ExecuteSqlRawAsync("ALTER TABLE ScheduleRules ADD COLUMN WhatsAppNumber TEXT NOT NULL DEFAULT '';");
-    }
-
-    var whitelistColumns = await GetTableColumnsAsync(connection, "WhitelistNumbers");
-    if (!whitelistColumns.Contains("CompanyId"))
-    {
-        await dbContext.Database.ExecuteSqlRawAsync("ALTER TABLE WhitelistNumbers ADD COLUMN CompanyId INTEGER NOT NULL DEFAULT 0;");
-    }
-
-    var messageColumns = await GetTableColumnsAsync(connection, "MessageLogs");
-    if (!messageColumns.Contains("CompanyId"))
-    {
-        await dbContext.Database.ExecuteSqlRawAsync("ALTER TABLE MessageLogs ADD COLUMN CompanyId INTEGER NOT NULL DEFAULT 0;");
-    }
-
-    if (!messageColumns.Contains("WhatsAppNumber"))
-    {
-        await dbContext.Database.ExecuteSqlRawAsync("ALTER TABLE MessageLogs ADD COLUMN WhatsAppNumber TEXT NOT NULL DEFAULT '';");
-    }
-
-    await dbContext.Database.ExecuteSqlRawAsync("DROP INDEX IF EXISTS IX_Users_CompanyId_Username;");
-    await dbContext.Database.ExecuteSqlRawAsync("DROP INDEX IF EXISTS IX_WhitelistNumbers_PhoneNumber;");
-    await dbContext.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Users_Username ON Users(Username);");
-    await dbContext.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_WhitelistNumbers_CompanyId_PhoneNumber ON WhitelistNumbers(CompanyId, PhoneNumber);");
-    await dbContext.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_MessageLogs_CompanyId_WhatsAppNumber_TimestampUtc ON MessageLogs(CompanyId, WhatsAppNumber, TimestampUtc);");
-    await dbContext.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_ScheduleRules_CompanyId_WhatsAppNumber ON ScheduleRules(CompanyId, WhatsAppNumber);");
-
-    await dbContext.Database.ExecuteSqlRawAsync(@"
-INSERT OR IGNORE INTO ScheduleRuleWhatsAppNumbers (ScheduleRuleId, WhatsAppNumber)
-SELECT Id, WhatsAppNumber
-FROM ScheduleRules
-WHERE WhatsAppNumber IS NOT NULL AND TRIM(WhatsAppNumber) != '';");
-}
-
-static async Task<HashSet<string>> GetTableColumnsAsync(DbConnection connection, string table)
-{
-    var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-    await using var cmd = connection.CreateCommand();
-    cmd.CommandText = $"PRAGMA table_info('{table}');";
-    await using var reader = await cmd.ExecuteReaderAsync();
-    while (await reader.ReadAsync())
-    {
-        columns.Add(reader.GetString(1));
-    }
-
-    return columns;
-}
-
-static async Task EnsureSingleTenantDataAsync(AppDbContext dbContext)
-{
-    var primaryCompany = await dbContext.Companies.FirstOrDefaultAsync(c => c.UniqueCode == SeedData.DefaultCompanyCode);
-    if (primaryCompany is null)
-    {
-        primaryCompany = new Company
-        {
-            Name = "Empresa Única",
-            UniqueCode = SeedData.DefaultCompanyCode,
-            CreatedAtUtc = DateTime.UtcNow
-        };
-
-        dbContext.Companies.Add(primaryCompany);
-        await dbContext.SaveChangesAsync();
-    }
-
-    if (!string.Equals(primaryCompany.UniqueCode, SeedData.DefaultCompanyCode, StringComparison.Ordinal))
-    {
-        primaryCompany.UniqueCode = SeedData.DefaultCompanyCode;
-        await dbContext.SaveChangesAsync();
-    }
-
-    var primaryCompanyId = primaryCompany.Id;
-
-    await dbContext.Database.ExecuteSqlInterpolatedAsync($"UPDATE Users SET CompanyId = {primaryCompanyId};");
-    await dbContext.Database.ExecuteSqlInterpolatedAsync($"UPDATE ScheduleRules SET CompanyId = {primaryCompanyId};");
-    await dbContext.Database.ExecuteSqlInterpolatedAsync($"UPDATE WhitelistNumbers SET CompanyId = {primaryCompanyId};");
-    await dbContext.Database.ExecuteSqlInterpolatedAsync($"UPDATE MessageLogs SET CompanyId = {primaryCompanyId};");
-    await dbContext.Database.ExecuteSqlInterpolatedAsync($"UPDATE Turmas SET CompanyId = {primaryCompanyId};");
-    await dbContext.Database.ExecuteSqlInterpolatedAsync($"UPDATE Contatos SET CompanyId = {primaryCompanyId};");
-
-    await dbContext.Database.ExecuteSqlRawAsync("DELETE FROM UserCompanies;");
-    await dbContext.Database.ExecuteSqlInterpolatedAsync($@"
-INSERT OR IGNORE INTO UserCompanies (UserId, CompanyId, AssignedAtUtc)
-SELECT Id, {primaryCompanyId}, COALESCE(CreatedAtUtc, datetime('now'))
-FROM Users;");
-
-    await dbContext.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM Companies WHERE Id <> {primaryCompanyId};");
-}
-
-static async Task EnsureScheduleRuleColumnsAsync(AppDbContext dbContext)
-{
-    await using var connection = dbContext.Database.GetDbConnection();
-    if (connection.State != System.Data.ConnectionState.Open)
-    {
-        await connection.OpenAsync();
-    }
-
-    var existingColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-    await using (var cmd = connection.CreateCommand())
-    {
-        cmd.CommandText = "PRAGMA table_info('ScheduleRules');";
-        await using var reader = await cmd.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            existingColumns.Add(reader.GetString(1));
-        }
-    }
-
-    var ddl = new List<string>();
-    if (!existingColumns.Contains("ThrottleMinutes"))
-    {
-        ddl.Add("ALTER TABLE ScheduleRules ADD COLUMN ThrottleMinutes INTEGER NOT NULL DEFAULT 0;");
-    }
-
-    if (!existingColumns.Contains("IsOutOfBusinessHours"))
-    {
-        ddl.Add("ALTER TABLE ScheduleRules ADD COLUMN IsOutOfBusinessHours INTEGER NOT NULL DEFAULT 0;");
-    }
-
-    if (!existingColumns.Contains("MaxDailyMessagesPerUser"))
-    {
-        ddl.Add("ALTER TABLE ScheduleRules ADD COLUMN MaxDailyMessagesPerUser INTEGER NULL;");
-    }
-
-    if (!existingColumns.Contains("ScheduleWindowsJson"))
-    {
-        ddl.Add("ALTER TABLE ScheduleRules ADD COLUMN ScheduleWindowsJson TEXT NOT NULL DEFAULT '[]';");
-    }
-
-    var whitelistColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-    await using (var whitelistCmd = connection.CreateCommand())
-    {
-        whitelistCmd.CommandText = "PRAGMA table_info('WhitelistNumbers');";
-        await using var reader = await whitelistCmd.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            whitelistColumns.Add(reader.GetString(1));
-        }
-    }
-
-    if (!whitelistColumns.Contains("Name"))
-    {
-        ddl.Add("ALTER TABLE WhitelistNumbers ADD COLUMN Name TEXT NULL;");
-    }
-
-    foreach (var sql in ddl)
-    {
-        await dbContext.Database.ExecuteSqlRawAsync(sql);
-
-        // Update existing users with NULL CreatedAtUtc to current date
-        await dbContext.Database.ExecuteSqlRawAsync("UPDATE Users SET CreatedAtUtc = datetime('now') WHERE CreatedAtUtc IS NULL;");
-    }
-}
-
-static async Task EnsureUserColumnsAsync(AppDbContext dbContext)
-{
-    await using var connection = dbContext.Database.GetDbConnection();
-    if (connection.State != System.Data.ConnectionState.Open)
-    {
-        await connection.OpenAsync();
-    }
-
-    var userColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-    await using (var cmd = connection.CreateCommand())
-    {
-        cmd.CommandText = "PRAGMA table_info('Users');";
-        await using var reader = await cmd.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            userColumns.Add(reader.GetString(1));
-        }
-    }
-
-    var ddl = new List<string>();
-    if (!userColumns.Contains("Email"))
-    {
-        ddl.Add("ALTER TABLE Users ADD COLUMN Email TEXT NULL;");
-    }
-
-    if (!userColumns.Contains("Phone"))
-    {
-        ddl.Add("ALTER TABLE Users ADD COLUMN Phone TEXT NULL;");
-    }
-
-    if (!userColumns.Contains("Cpf"))
-    {
-        ddl.Add("ALTER TABLE Users ADD COLUMN Cpf TEXT NULL;");
-    }
-
-    if (!userColumns.Contains("FullName"))
-    {
-        ddl.Add("ALTER TABLE Users ADD COLUMN FullName TEXT NULL;");
-    }
-
-    if (!userColumns.Contains("Title"))
-    {
-        ddl.Add("ALTER TABLE Users ADD COLUMN Title TEXT NULL;");
-    }
-
-    if (!userColumns.Contains("Notes"))
-    {
-        ddl.Add("ALTER TABLE Users ADD COLUMN Notes TEXT NULL;");
-    }
-
-    if (!userColumns.Contains("CreatedAtUtc"))
-    {
-        ddl.Add("ALTER TABLE Users ADD COLUMN CreatedAtUtc TEXT NULL;");
-    }
-
-    if (!userColumns.Contains("UpdatedAtUtc"))
-    {
-        ddl.Add("ALTER TABLE Users ADD COLUMN UpdatedAtUtc TEXT NULL;");
-    }
-
-    if (!userColumns.Contains("IsAdmin"))
-    {
-        ddl.Add("ALTER TABLE Users ADD COLUMN IsAdmin INTEGER NOT NULL DEFAULT 0;");
-    }
-
-    foreach (var sql in ddl)
-    {
-        await dbContext.Database.ExecuteSqlRawAsync(sql);
-    }
-
-    await dbContext.Database.ExecuteSqlRawAsync("UPDATE Users SET IsAdmin = 1 WHERE lower(Username) = 'admin';");
-}
-
-static async Task EnsureContatosAndTurmasTablesAsync(AppDbContext dbContext)
-{
-    await dbContext.Database.ExecuteSqlRawAsync(@"
-CREATE TABLE IF NOT EXISTS Turmas (
-    Id INTEGER NOT NULL CONSTRAINT PK_Turmas PRIMARY KEY AUTOINCREMENT,
-    CompanyId INTEGER NOT NULL,
-    Name TEXT NOT NULL,
-    IsActive INTEGER NOT NULL DEFAULT 1,
-    CreatedAtUtc TEXT NOT NULL
-);");
-
-    await dbContext.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_Turmas_CompanyId_Name ON Turmas(CompanyId, Name);");
-
-    await dbContext.Database.ExecuteSqlRawAsync(@"
-CREATE TABLE IF NOT EXISTS Contatos (
-    Id INTEGER NOT NULL CONSTRAINT PK_Contatos PRIMARY KEY AUTOINCREMENT,
-    CompanyId INTEGER NOT NULL,
-    Name TEXT NOT NULL,
-    PhoneNumber TEXT NOT NULL,
-    TurmaId INTEGER,
-    IsActive INTEGER NOT NULL DEFAULT 1,
-    CreatedAtUtc TEXT NOT NULL,
-    FOREIGN KEY(TurmaId) REFERENCES Turmas(Id)
-);");
-
-    await dbContext.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_Contatos_CompanyId_PhoneNumber ON Contatos(CompanyId, PhoneNumber);");
-}

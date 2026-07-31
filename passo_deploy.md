@@ -80,7 +80,6 @@ Na pasta `whatsapp-bridge`, crie outro `.env`:
 BRIDGE_PORT=3001
 BACKEND_WEBHOOK_URL=http://127.0.0.1:5207/api/webhooks/whatsapp
 BACKEND_WEBHOOK_TOKEN=token_compartilhado_com_bridge
-BACKEND_COMPANY_CODE=EMPRESA-TESTE
 ```
 
 Observações:
@@ -195,3 +194,124 @@ Se quiser simplificar ainda mais, eu posso te entregar a próxima versão deste 
 - configuração do `nginx.conf`
 - exemplos de `.env`
 - comandos de deploy e atualização
+
+## 16. Atualizar produção com as mudanças desta sessão (isolamento por usuário + mídia/ack + LID)
+
+Este é o procedimento **específico** para levar para produção tudo que foi feito nesta sessão:
+remoção do multi-tenant, isolamento total por usuário (`OwnerUserId`, 1 WhatsApp por usuário),
+correções de LID, mídia persistida em disco, confirmação de leitura (ack) e a página de
+Documentar Conversa. Use isto **uma única vez** — depois que essas migrations estiverem
+marcadas como aplicadas, os próximos `git pull` + deploy voltam a ser o fluxo normal (a própria
+API já roda `Database.MigrateAsync()` no boot, então normalmente nem precisa rodar `dotnet ef`
+manualmente).
+
+### 16.1 Contexto importante antes de começar
+
+O banco de produção foi criado historicamente com `EnsureCreated()` + SQL manual, não com
+`dotnet ef database update`. Isso significa que a tabela `__EFMigrationsHistory` de lá está
+**vazia**, mesmo o banco já tendo o schema das 3 primeiras migrations do projeto
+(`InitialCreate`, `AddContactNameMessageLog`, `AddScheduleWindowsJson`). Se você rodar
+`dotnet ef database update` direto, o EF tenta aplicar essas 3 migrations de novo do zero e
+quebra (colunas/tabelas já existem). Por isso o passo 16.3 abaixo "baselina" o histórico antes
+de deixar o EF seguir com as migrations novas de verdade.
+
+As migrations que ainda **não** estão em produção (as que essa sessão criou) são:
+
+1. `20260731131436_RemoveMultiTenantAndWhitelist` — remove `Company`/`UserCompany`/`WhitelistNumber`, adiciona `MessagesJson`/`MessageId`.
+2. `20260731132421_AddOwnerUserIsolation` — adiciona `OwnerUserId` em `Turmas`/`ScheduleRules`/`MessageLogs`/`Contatos` (com backfill automático para o usuário `admin`), remove `ScheduleRuleWhatsAppNumbers`.
+3. `20260731170322_AddMediaAndAckToMessageLogs` — adiciona `MediaUrl`/`MediaMimeType`/`MediaFileName`/`AckStatus` em `MessageLogs`.
+
+Essas 3 rodam de verdade e alteram dados (a #2 reatribui todos os Contatos/Turmas/Regras/Mensagens
+existentes para o usuário `admin` — é o comportamento esperado, combinado nesta sessão).
+
+### 16.2 Backup (obrigatório, sem exceção)
+
+```bash
+cd /opt/api_bot_whatsapp/ApiBotWhatsapp.Api   # ajuste para o caminho real do seu deploy
+cp app.db "app.db.backup-$(date +%Y%m%d-%H%M%S)"
+```
+
+Não prossiga sem esse backup. Se algo sair errado, restaurar esse arquivo é o caminho de volta.
+
+### 16.3 Baselinar o histórico de migrations (uma vez só)
+
+Confirme primeiro que a tabela está mesmo vazia (evita duplicar se alguém já rodou isso antes):
+
+```bash
+sqlite3 app.db "SELECT * FROM __EFMigrationsHistory;"
+```
+
+Se vier vazio, insira as 3 migrations antigas como já aplicadas (sem executá-las — o schema
+delas já existe no banco):
+
+```bash
+sqlite3 app.db "INSERT INTO __EFMigrationsHistory (MigrationId, ProductVersion) VALUES
+  ('20260506114638_InitialCreate', '10.0.3'),
+  ('20260625122146_AddContactNameMessageLog', '10.0.3'),
+  ('20260702170000_AddScheduleWindowsJson', '10.0.3');"
+```
+
+Se a consulta acima já mostrou essas 3 linhas (ou parte delas), **não repita o INSERT** — pule
+direto para o 16.4.
+
+### 16.4 git pull e aplicar as migrations novas
+
+```bash
+cd /opt/api_bot_whatsapp
+git pull
+cd ApiBotWhatsapp.Api
+dotnet tool update --global dotnet-ef --version 10.0.3   # se ainda não estiver nessa versão
+dotnet ef database update
+```
+
+Isso deve rodar só as 3 migrations novas (passo 16.1) — confirme no output que ele lista
+exatamente `RemoveMultiTenantAndWhitelist`, `AddOwnerUserIsolation` e
+`AddMediaAndAckToMessageLogs`, nada além disso. Se você preferir pular esse comando manual, tudo
+bem: a API aplica as mesmas migrations sozinha assim que subir (`Database.MigrateAsync()` no
+`Program.cs`) — o passo manual aqui serve só pra você ver o resultado antes de reiniciar o
+serviço de verdade.
+
+### 16.5 Recompilar e reiniciar os 3 serviços
+
+```bash
+# API
+cd /opt/api_bot_whatsapp/ApiBotWhatsapp.Api
+dotnet publish -c Release -o /opt/api_bot_whatsapp/publish/api
+sudo systemctl restart api-bot-whatsapp   # ou o nome do seu serviço/processo
+
+# Bridge — a versão do whatsapp-web.js foi atualizada (1.34.6 -> 1.34.7) e há endpoints novos
+cd /opt/api_bot_whatsapp/whatsapp-bridge
+npm install
+pm2 restart whatsapp-bridge   # ou systemctl/o que você usa para manter o processo vivo
+
+# Frontend
+cd /opt/api_bot_whatsapp/frontend
+npm install
+npm run build
+# copie dist/ para a pasta servida pelo Nginx, como no passo 7
+```
+
+### 16.6 Efeitos colaterais esperados (uma vez só, neste deploy específico)
+
+- **Reconectar o WhatsApp**: a sessão atual do bridge usa um id antigo (não o esquema
+  `user-{userId}` novo). Depois de subir, entre em `/whatsapp-connections` e reconecte via QR ou
+  pareamento por número. Depois disso, o cache de versão do WhatsApp Web (`webVersionCache`) evita
+  que isso se repita em deploys futuros.
+- **Todos os dados existentes (Contatos, Turmas, Regras, Mensagens) passam a pertencer ao
+  usuário `admin`** — é o comportamento combinado para essa migração de isolamento por usuário.
+- **Pasta de mídia nova**: `ApiBotWhatsapp.Api/wwwroot/uploads/` é criada automaticamente no
+  boot e servida como estático (`/uploads/...`) pela própria API. Se o Nginx só faz proxy de
+  `/api/` para a API, confirme que uma rota tipo `/uploads/` também é encaminhada, senão as
+  imagens enviadas/recebidas não aparecem no navegador.
+
+### 16.7 Verificação pós-deploy
+
+- `GET /health` na API e no bridge.
+- Login funciona e mostra só os dados do usuário logado (teste com 2 contas se tiver).
+- Reconectar o WhatsApp em `/whatsapp-connections` e confirmar status "Conectado".
+- Mandar uma mensagem de teste de um número cadastrado em Contatos e confirmar no console da
+  API os logs `Webhook received:` / `Auto-reply decision:` (adicionados nesta sessão).
+- Enviar uma imagem pelo chat em `/messages` e confirmar que ela aparece na conversa (não só o
+  nome do arquivo) — valida a pasta `wwwroot/uploads/` e o proxy do Nginx.
+- Abrir `/documentacao`, escolher uma pessoa, marcar algumas datas e clicar em "Documentar" —
+  confirma que o histórico foi preservado pela migration.

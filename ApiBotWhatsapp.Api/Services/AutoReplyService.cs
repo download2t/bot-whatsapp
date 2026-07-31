@@ -9,7 +9,13 @@ using System.Text.Json;
 
 namespace ApiBotWhatsapp.Api.Services;
 
-public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender messageSender, IConfiguration configuration)
+public class AutoReplyService(
+    AppDbContext dbContext,
+    WhatsAppMessageSender messageSender,
+    WhatsAppBridgeClient bridgeClient,
+    MediaStorageService mediaStorage,
+    IConfiguration configuration,
+    ILogger<AutoReplyService> logger)
 {
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> PhoneLocks = new();
     private static readonly TimeSpan MaxIncomingMessageAge = TimeSpan.FromMinutes(5);
@@ -20,6 +26,7 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
 
     public async Task<WhatsAppWebhookResponse> ProcessIncomingMessageAsync(WhatsAppWebhookRequest request, CancellationToken cancellationToken)
     {
+        var ownerUserId = request.OwnerUserId!.Value;
         var normalizedPhone = PhoneNumberUtils.Normalize(request.PhoneNumber);
         var normalizedWhatsApp = PhoneNumberUtils.Normalize(request.WhatsAppNumber ?? string.Empty);
         if (string.IsNullOrWhiteSpace(normalizedWhatsApp))
@@ -27,66 +34,147 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
             normalizedWhatsApp = PhoneNumberUtils.Normalize(configuration["WhatsApp:DefaultConnectedNumber"] ?? string.Empty);
         }
 
-        if (string.IsNullOrWhiteSpace(normalizedWhatsApp))
-        {
-            return new WhatsAppWebhookResponse(false, "WhatsAppNumber is required for tenant routing.", null);
-        }
-
-        var companyCode = string.IsNullOrWhiteSpace(request.CompanyCode)
-            ? SeedData.DefaultCompanyCode
-            : request.CompanyCode.Trim();
-
-        var company = await ResolveCompanyAsync(companyCode, normalizedWhatsApp, cancellationToken);
-        if (company is null)
-        {
-            return new WhatsAppWebhookResponse(false, $"Company not found for code: {companyCode}", null);
-        }
-
         var messageTimestampUtc = request.MessageTimestampUtc?.ToUniversalTime() ?? DateTime.UtcNow;
         var messageAge = DateTime.UtcNow - messageTimestampUtc;
         var isStale = messageAge > MaxIncomingMessageAge;
 
-        var phoneLock = PhoneLocks.GetOrAdd(normalizedPhone, _ => new SemaphoreSlim(1, 1));
+        // Locks are scoped per owner+phone so two different users' contacts never contend.
+        var lockKey = $"{ownerUserId}:{normalizedPhone}";
+        var phoneLock = PhoneLocks.GetOrAdd(lockKey, _ => new SemaphoreSlim(1, 1));
         await phoneLock.WaitAsync(cancellationToken);
 
         try
         {
+            // Idempotency guard: whatsapp-web.js can re-emit message_create for the same
+            // message (e.g. after a session reconnect/resync). Without this, a replayed
+            // message could be logged and auto-replied to a second time.
+            if (!string.IsNullOrWhiteSpace(request.MessageId))
+            {
+                var alreadyProcessed = await dbContext.MessageLogs
+                    .AnyAsync(item => item.MessageId == request.MessageId, cancellationToken);
+                if (alreadyProcessed)
+                {
+                    return new WhatsAppWebhookResponse(false, "Duplicate message ignored (already processed).", null);
+                }
+            }
+
             var brasiliaTime = GetBrasiliaTimeFromUtc(messageTimestampUtc, configuration["WhatsApp:TimeZoneId"]);
 
             // 1. Define a direção e o status baseado no que veio do Node.js
             var direction = !string.IsNullOrWhiteSpace(request.Direction) ? request.Direction : "Incoming";
             var status = direction == "Outgoing" ? "Sent" : "Received";
 
+            string? incomingMediaUrl = null;
+            if (!string.IsNullOrWhiteSpace(request.MediaBase64))
+            {
+                try
+                {
+                    incomingMediaUrl = mediaStorage.SaveBase64(ownerUserId, request.MediaBase64, request.MediaMimeType, request.MediaFileName);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to save incoming media for OwnerUserId={OwnerUserId} Phone={Phone}.", ownerUserId, normalizedPhone);
+                }
+            }
+
             var incomingLog = new ApiBotWhatsapp.Api.Models.MessageLog
             {
-                CompanyId = company.Id,
+                OwnerUserId = ownerUserId,
                 WhatsAppNumber = normalizedWhatsApp,
                 Direction = direction,
                 PhoneNumber = normalizedPhone,
-                ContactName = request.ContactName, // <--- NOME GRAVADO AQUI
+                ContactName = request.ContactName,
                 Content = request.Message,
+                MediaUrl = incomingMediaUrl,
+                MediaMimeType = incomingMediaUrl is not null ? request.MediaMimeType : null,
+                MediaFileName = incomingMediaUrl is not null ? request.MediaFileName : null,
                 IsAutomatic = false,
                 Status = status,
-                TimestampUtc = brasiliaTime
+                TimestampUtc = brasiliaTime,
+                MessageId = request.MessageId
             };
 
             dbContext.MessageLogs.Add(incomingLog);
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            // 2. TRAVA DE SEGURANÇA: Se a mensagem foi enviada por nós (Outgoing), 
+            // 2. TRAVA DE SEGURANÇA: Se a mensagem foi enviada por nós (Outgoing),
             // paramos o processo aqui para o Bot não responder a si próprio.
             if (direction == "Outgoing")
             {
                 return new WhatsAppWebhookResponse(false, "Outgoing message logged. Auto reply skipped.", null);
             }
 
-            var equivalentPhoneNumbers = PhoneNumberUtils.GetEquivalentBrazilianNumbers(normalizedPhone);
-            var isInWhitelist = await dbContext.WhitelistNumbers
-                .AnyAsync(item => item.CompanyId == company.Id && equivalentPhoneNumbers.Contains(item.PhoneNumber), cancellationToken);
+            // Só respondemos automaticamente quem está cadastrado em Contatos do MESMO dono
+            // (qualquer turma). Quem não é um contato conhecido não participa da automação.
+            // Compara pelos últimos dígitos (número local) em vez de string exata: absorve
+            // diferenças de DDI (contato cadastrado sem "55", WhatsApp sempre manda com) e o
+            // "9" extra do celular brasileiro, de forma genérica para qualquer país.
+            var phoneCore = PhoneNumberUtils.CoreDigits(normalizedPhone);
+            var matchedContact = await dbContext.Contatos
+                .Where(item => item.OwnerUserId == ownerUserId && item.IsActive)
+                .FirstOrDefaultAsync(item => EF.Functions.Like(item.PhoneNumber, "%" + phoneCore), cancellationToken);
 
-            if (isInWhitelist)
+            // WhatsApp's LID (Linked ID) privacy layer can report the sender as an opaque
+            // "{digits}@lid" id instead of a real phone number when there's no prior message
+            // history with the connected number — in that case PhoneNumber is meaningless and
+            // will never suffix-match a registered contact. Instead of trying to decode the LID
+            // (unreliable/undocumented), we do the reverse: ask the bridge which WID it currently
+            // uses for each of our registered contacts, and see if any of them equals this LID.
+            if (matchedContact is null
+                && !string.IsNullOrWhiteSpace(request.RawSenderId)
+                && request.RawSenderId.EndsWith("@lid", StringComparison.OrdinalIgnoreCase))
             {
-                return new WhatsAppWebhookResponse(false, "Number is in whitelist. Auto reply skipped.", null);
+                logger.LogInformation(
+                    "Contact gate: no direct match for Phone={Phone} (core={Core}). RawSenderId={RawSenderId} looks like a LID, trying reverse WID lookup against registered contacts for OwnerUserId={OwnerUserId}.",
+                    normalizedPhone, phoneCore, request.RawSenderId, ownerUserId);
+
+                var candidateContacts = await dbContext.Contatos
+                    .Where(item => item.OwnerUserId == ownerUserId && item.IsActive)
+                    .ToListAsync(cancellationToken);
+
+                if (candidateContacts.Count > 0)
+                {
+                    var resolved = await bridgeClient.ResolveWidsAsync(
+                        $"user-{ownerUserId}",
+                        candidateContacts.Select(item => item.PhoneNumber).ToList(),
+                        cancellationToken);
+
+                    var match = resolved.FirstOrDefault(item =>
+                        string.Equals(item.Wid, request.RawSenderId, StringComparison.OrdinalIgnoreCase));
+
+                    if (match is not null)
+                    {
+                        matchedContact = candidateContacts.FirstOrDefault(item => item.PhoneNumber == match.PhoneNumber);
+                    }
+
+                    if (matchedContact is not null)
+                    {
+                        logger.LogInformation(
+                            "Contact gate: reverse WID lookup matched RawSenderId={RawSenderId} to registered contact phone={ContactPhone}. Using that as the real sender from now on.",
+                            request.RawSenderId, matchedContact.PhoneNumber);
+
+                        // Now that we know who this really is, replace the meaningless LID
+                        // digit-string with the contact's real phone for logging, throttling,
+                        // and for sending the reply.
+                        normalizedPhone = PhoneNumberUtils.Normalize(matchedContact.PhoneNumber);
+                        incomingLog.PhoneNumber = normalizedPhone;
+                        await dbContext.SaveChangesAsync(cancellationToken);
+                    }
+                    else
+                    {
+                        logger.LogInformation(
+                            "Contact gate: reverse WID lookup found no match for RawSenderId={RawSenderId} among {Count} registered contacts.",
+                            request.RawSenderId, candidateContacts.Count);
+                    }
+                }
+            }
+
+            if (matchedContact is null)
+            {
+                logger.LogInformation(
+                    "Contact gate: Phone={Phone} (core={Core}) RawSenderId={RawSenderId} is not a registered contact for OwnerUserId={OwnerUserId}. Auto reply skipped.",
+                    normalizedPhone, phoneCore, request.RawSenderId, ownerUserId);
+                return new WhatsAppWebhookResponse(false, "Phone number is not a registered contact. Auto reply skipped.", null);
             }
 
             if (isStale)
@@ -96,10 +184,7 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
 
             var currentTime = GetCurrentBrasiliaTime(configuration["WhatsApp:TimeZoneId"]);
             var matchedRule = await dbContext.ScheduleRules
-                .Where(rule => rule.CompanyId == company.Id && rule.IsEnabled)
-                .Where(rule =>
-                    dbContext.ScheduleRuleWhatsAppNumbers.Any(item => item.ScheduleRuleId == rule.Id && item.WhatsAppNumber == normalizedWhatsApp)
-                    || (rule.WhatsAppNumber == normalizedWhatsApp && !dbContext.ScheduleRuleWhatsAppNumbers.Any(item => item.ScheduleRuleId == rule.Id)))
+                .Where(rule => rule.OwnerUserId == ownerUserId && rule.IsEnabled)
                 .OrderBy(rule => rule.StartTime)
                 .ToListAsync(cancellationToken);
 
@@ -109,11 +194,19 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
                 return new WhatsAppWebhookResponse(false, "No active schedule rule for current time.", null);
             }
 
+            var currentDayOfWeek = (int)currentTime.DayOfWeek;
+            var messageForToday = GetRuleMessages(rule)
+                .FirstOrDefault(item => item.Days.Contains(currentDayOfWeek));
+            if (messageForToday is null)
+            {
+                return new WhatsAppWebhookResponse(false, "No message configured for the current day of week. Auto reply skipped.", null);
+            }
+
             // Check throttle: don't send if already sent within ThrottleMinutes
             if (rule.ThrottleMinutes > 0)
             {
-                var timeSinceLastMessage = await GetTimeSinceLastAutomaticMessageAsync(company.Id, normalizedPhone, normalizedWhatsApp, brasiliaTime, cancellationToken);
-                
+                var timeSinceLastMessage = await GetTimeSinceLastAutomaticMessageAsync(ownerUserId, normalizedPhone, brasiliaTime, cancellationToken);
+
                 if (timeSinceLastMessage.HasValue && timeSinceLastMessage.Value.TotalMinutes < rule.ThrottleMinutes)
                 {
                     return new WhatsAppWebhookResponse(false,
@@ -124,7 +217,7 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
             // Check daily limit
             if (rule.MaxDailyMessagesPerUser.HasValue && rule.MaxDailyMessagesPerUser > 0)
             {
-                var todayMessageCount = await GetTodayAutomaticMessageCountAsync(company.Id, normalizedPhone, normalizedWhatsApp, rule.Id, brasiliaTime, cancellationToken);
+                var todayMessageCount = await GetTodayAutomaticMessageCountAsync(ownerUserId, normalizedPhone, brasiliaTime, cancellationToken);
                 if (todayMessageCount >= rule.MaxDailyMessagesPerUser)
                 {
                     return new WhatsAppWebhookResponse(false,
@@ -132,25 +225,26 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
                 }
             }
 
-            var dispatchResult = await messageSender.SendMessageAsync(normalizedPhone, rule.Message, true, normalizedWhatsApp, cancellationToken);
+            var dispatchResult = await messageSender.SendMessageAsync(normalizedPhone, messageForToday.Text, true, $"user-{ownerUserId}", cancellationToken);
 
             var outgoingLog = new ApiBotWhatsapp.Api.Models.MessageLog
             {
-                CompanyId = company.Id,
+                OwnerUserId = ownerUserId,
                 WhatsAppNumber = normalizedWhatsApp,
                 Direction = "Outgoing",
                 PhoneNumber = normalizedPhone,
-                ContactName = request.ContactName, // <--- NOME MANTIDO TAMBÉM NA RESPOSTA AUTOMÁTICA
-                Content = rule.Message,
+                ContactName = request.ContactName,
+                Content = messageForToday.Text,
                 IsAutomatic = true,
                 Status = dispatchResult.Status,
+                MessageId = dispatchResult.MessageId,
                 TimestampUtc = brasiliaTime
             };
 
             dbContext.MessageLogs.Add(outgoingLog);
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            return new WhatsAppWebhookResponse(dispatchResult.Success, dispatchResult.Status, rule.Message);
+            return new WhatsAppWebhookResponse(dispatchResult.Success, dispatchResult.Status, messageForToday.Text);
         }
         finally
         {
@@ -220,13 +314,12 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
         return false;
     }
 
-    private async Task<TimeSpan?> GetTimeSinceLastAutomaticMessageAsync(int companyId, string phoneNumber, string whatsAppNumber, DateTime nowReference, CancellationToken cancellationToken)
+    private async Task<TimeSpan?> GetTimeSinceLastAutomaticMessageAsync(int ownerUserId, string phoneNumber, DateTime nowReference, CancellationToken cancellationToken)
     {
         var lastMessage = await dbContext.MessageLogs
-            .Where(m => m.CompanyId == companyId
-                && m.WhatsAppNumber == whatsAppNumber
-                && m.PhoneNumber == phoneNumber 
-                && m.IsAutomatic 
+            .Where(m => m.OwnerUserId == ownerUserId
+                && m.PhoneNumber == phoneNumber
+                && m.IsAutomatic
                 && m.Direction == "Outgoing")
             .OrderByDescending(m => m.TimestampUtc)
             .FirstOrDefaultAsync(cancellationToken);
@@ -237,16 +330,15 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
         return nowReference - lastMessage.TimestampUtc;
     }
 
-    private async Task<int> GetTodayAutomaticMessageCountAsync(int companyId, string phoneNumber, string whatsAppNumber, int ruleId, DateTime brasiliaTime, CancellationToken cancellationToken)
+    private async Task<int> GetTodayAutomaticMessageCountAsync(int ownerUserId, string phoneNumber, DateTime brasiliaTime, CancellationToken cancellationToken)
     {
         var todayStart = brasiliaTime.Date;
         var todayEnd = todayStart.AddDays(1);
 
         return await dbContext.MessageLogs
-            .CountAsync(m => m.CompanyId == companyId
-                && m.WhatsAppNumber == whatsAppNumber
-                && m.PhoneNumber == phoneNumber 
-                && m.IsAutomatic 
+            .CountAsync(m => m.OwnerUserId == ownerUserId
+                && m.PhoneNumber == phoneNumber
+                && m.IsAutomatic
                 && m.Direction == "Outgoing"
                 && m.TimestampUtc >= todayStart
                 && m.TimestampUtc < todayEnd,
@@ -294,6 +386,23 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
         return GetLegacyWindows(rule);
     }
 
+    private static List<ScheduleRuleMessageRequest> GetRuleMessages(ScheduleRule rule)
+    {
+        if (string.IsNullOrWhiteSpace(rule.MessagesJson))
+        {
+            return [];
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<ScheduleRuleMessageRequest>>(rule.MessagesJson, WindowsJsonOptions) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
     private static DateTime GetCurrentBrasiliaTime(string? configuredTimeZoneId)
     {
         configuredTimeZoneId = string.IsNullOrWhiteSpace(configuredTimeZoneId)
@@ -335,55 +444,5 @@ public class AutoReplyService(AppDbContext dbContext, WhatsAppMessageSender mess
         {
             return DateTime.SpecifyKind(utcTime, DateTimeKind.Utc).ToLocalTime();
         }
-    }
-
-    private async Task<Company?> ResolveCompanyAsync(string companyCode, string normalizedWhatsApp, CancellationToken cancellationToken)
-    {
-        var company = await dbContext.Companies.FirstOrDefaultAsync(c => c.UniqueCode == companyCode, cancellationToken);
-        if (company is not null)
-        {
-            return company;
-        }
-
-        if (!string.IsNullOrWhiteSpace(normalizedWhatsApp))
-        {
-            var companyIdsByRules = await dbContext.ScheduleRules
-                .Where(rule =>
-                    dbContext.ScheduleRuleWhatsAppNumbers.Any(item => item.ScheduleRuleId == rule.Id && item.WhatsAppNumber == normalizedWhatsApp)
-                    || (rule.WhatsAppNumber == normalizedWhatsApp && !dbContext.ScheduleRuleWhatsAppNumbers.Any(item => item.ScheduleRuleId == rule.Id)))
-                .Select(rule => rule.CompanyId)
-                .Distinct()
-                .Take(2)
-                .ToListAsync(cancellationToken);
-
-            if (companyIdsByRules.Count == 1)
-            {
-                return await dbContext.Companies.FirstOrDefaultAsync(c => c.Id == companyIdsByRules[0], cancellationToken);
-            }
-
-            var companyIdsByLogs = await dbContext.MessageLogs
-                .Where(item => item.WhatsAppNumber == normalizedWhatsApp)
-                .Select(item => item.CompanyId)
-                .Distinct()
-                .Take(2)
-                .ToListAsync(cancellationToken);
-
-            if (companyIdsByLogs.Count == 1)
-            {
-                return await dbContext.Companies.FirstOrDefaultAsync(c => c.Id == companyIdsByLogs[0], cancellationToken);
-            }
-        }
-
-        var allCompanyIds = await dbContext.Companies
-            .Select(item => item.Id)
-            .Take(2)
-            .ToListAsync(cancellationToken);
-
-        if (allCompanyIds.Count == 1)
-        {
-            return await dbContext.Companies.FirstOrDefaultAsync(c => c.Id == allCompanyIds[0], cancellationToken);
-        }
-
-        return null;
     }
 }

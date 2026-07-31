@@ -3,6 +3,7 @@ using System;
 using ApiBotWhatsapp.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ApiBotWhatsapp.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260731131436_RemoveMultiTenantAndWhitelist")]
+    partial class RemoveMultiTenantAndWhitelist
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.3");
@@ -34,9 +37,6 @@ namespace ApiBotWhatsapp.Api.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("OwnerUserId")
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("PhoneNumber")
                         .IsRequired()
                         .HasMaxLength(40)
@@ -47,9 +47,9 @@ namespace ApiBotWhatsapp.Api.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TurmaId");
+                    b.HasIndex("PhoneNumber");
 
-                    b.HasIndex("OwnerUserId", "PhoneNumber");
+                    b.HasIndex("TurmaId");
 
                     b.ToTable("Contatos");
                 });
@@ -59,10 +59,6 @@ namespace ApiBotWhatsapp.Api.Migrations
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
-
-                    b.Property<string>("AckStatus")
-                        .HasMaxLength(20)
-                        .HasColumnType("TEXT");
 
                     b.Property<string>("ContactName")
                         .HasColumnType("TEXT");
@@ -80,24 +76,9 @@ namespace ApiBotWhatsapp.Api.Migrations
                     b.Property<bool>("IsAutomatic")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("MediaFileName")
-                        .HasMaxLength(255)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("MediaMimeType")
-                        .HasMaxLength(150)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("MediaUrl")
-                        .HasMaxLength(300)
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("MessageId")
                         .HasMaxLength(150)
                         .HasColumnType("TEXT");
-
-                    b.Property<int>("OwnerUserId")
-                        .HasColumnType("INTEGER");
 
                     b.Property<string>("PhoneNumber")
                         .IsRequired()
@@ -121,7 +102,7 @@ namespace ApiBotWhatsapp.Api.Migrations
 
                     b.HasIndex("MessageId");
 
-                    b.HasIndex("OwnerUserId", "WhatsAppNumber", "TimestampUtc");
+                    b.HasIndex("WhatsAppNumber", "TimestampUtc");
 
                     b.ToTable("MessageLogs");
                 });
@@ -157,9 +138,6 @@ namespace ApiBotWhatsapp.Api.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("OwnerUserId")
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("ScheduleWindowsJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -171,11 +149,32 @@ namespace ApiBotWhatsapp.Api.Migrations
                     b.Property<int>("ThrottleMinutes")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("WhatsAppNumber")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("OwnerUserId");
+                    b.HasIndex("WhatsAppNumber");
 
                     b.ToTable("ScheduleRules");
+                });
+
+            modelBuilder.Entity("ApiBotWhatsapp.Api.Models.ScheduleRuleWhatsAppNumber", b =>
+                {
+                    b.Property<int>("ScheduleRuleId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("WhatsAppNumber")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ScheduleRuleId", "WhatsAppNumber");
+
+                    b.HasIndex("WhatsAppNumber");
+
+                    b.ToTable("ScheduleRuleWhatsAppNumbers");
                 });
 
             modelBuilder.Entity("ApiBotWhatsapp.Api.Models.Turma", b =>
@@ -195,12 +194,9 @@ namespace ApiBotWhatsapp.Api.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("OwnerUserId")
-                        .HasColumnType("INTEGER");
-
                     b.HasKey("Id");
 
-                    b.HasIndex("OwnerUserId", "Name");
+                    b.HasIndex("Name");
 
                     b.ToTable("Turmas");
                 });

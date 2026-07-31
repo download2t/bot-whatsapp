@@ -6,7 +6,7 @@ public class Contato
 {
     public int Id { get; set; }
 
-    public int CompanyId { get; set; }
+    public int OwnerUserId { get; set; }
 
     [Required]
     [MaxLength(200)]

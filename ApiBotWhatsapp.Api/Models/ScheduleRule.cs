@@ -6,11 +6,7 @@ public class ScheduleRule
 {
     public int Id { get; set; }
 
-    public int CompanyId { get; set; }
-
-    [Required]
-    [MaxLength(20)]
-    public string WhatsAppNumber { get; set; } = string.Empty;
+    public int OwnerUserId { get; set; }
 
     [MaxLength(100)]
     public string Name { get; set; } = string.Empty;
@@ -22,9 +18,9 @@ public class ScheduleRule
     [Required]
     public string ScheduleWindowsJson { get; set; } = "[]";
 
+    // JSON list of { Text, Days[] } - which message to send depending on the current day of week.
     [Required]
-    [MaxLength(500)]
-    public string Message { get; set; } = string.Empty;
+    public string MessagesJson { get; set; } = "[]";
 
     public bool IsEnabled { get; set; } = true;
 

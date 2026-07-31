@@ -13,19 +13,11 @@ namespace ApiBotWhatsapp.Api.Controllers;
 [Route("api/contatos")]
 public class ContatosController(AppDbContext dbContext) : ControllerBase
 {
-    private int? GetCurrentCompanyId()
-    {
-        var claim = User.FindFirst("company_id")?.Value;
-        return int.TryParse(claim, out var companyId) ? companyId : null;
-    }
-
     [HttpGet]
     public async Task<ActionResult<IEnumerable<ContatoResponse>>> GetAll([FromQuery] int? turmaId, [FromQuery] string? name, [FromQuery] string? phone, CancellationToken cancellationToken = default)
     {
-        var companyId = GetCurrentCompanyId();
-        if (companyId is null) return Unauthorized();
-
-        var q = dbContext.Contatos.AsQueryable().Where(c => c.CompanyId == companyId.Value);
+        var ownerUserId = this.GetCurrentUserId();
+        var q = dbContext.Contatos.Where(c => c.OwnerUserId == ownerUserId);
 
         if (turmaId is not null)
             q = q.Where(c => c.TurmaId == turmaId.Value);
@@ -52,14 +44,14 @@ public class ContatosController(AppDbContext dbContext) : ControllerBase
     [HttpPost]
     public async Task<ActionResult<ContatoResponse>> Create([FromBody] ContatoRequest req, CancellationToken cancellationToken)
     {
-        var companyId = GetCurrentCompanyId();
-        if (companyId is null) return Unauthorized();
-
+        var ownerUserId = this.GetCurrentUserId();
         var name = req.Name?.Trim();
         var normalized = PhoneNumberUtils.Normalize(req.PhoneNumber);
         if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(normalized)) return BadRequest("Name and phone number are required.");
 
-        var entity = new Contato { CompanyId = companyId.Value, Name = name!, PhoneNumber = normalized, TurmaId = req.TurmaId, IsActive = req.IsActive };
+        var turmaId = await ResolveOwnedTurmaIdAsync(req.TurmaId, ownerUserId, cancellationToken);
+
+        var entity = new Contato { OwnerUserId = ownerUserId, Name = name!, PhoneNumber = normalized, TurmaId = turmaId, IsActive = req.IsActive };
         dbContext.Contatos.Add(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -69,10 +61,8 @@ public class ContatosController(AppDbContext dbContext) : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<ActionResult<ContatoResponse>> Update(int id, [FromBody] ContatoRequest req, CancellationToken cancellationToken)
     {
-        var companyId = GetCurrentCompanyId();
-        if (companyId is null) return Unauthorized();
-
-        var entity = await dbContext.Contatos.FirstOrDefaultAsync(c => c.Id == id && c.CompanyId == companyId.Value, cancellationToken);
+        var ownerUserId = this.GetCurrentUserId();
+        var entity = await dbContext.Contatos.FirstOrDefaultAsync(c => c.Id == id && c.OwnerUserId == ownerUserId, cancellationToken);
         if (entity is null) return NotFound();
 
         var name = req.Name?.Trim();
@@ -81,7 +71,7 @@ public class ContatosController(AppDbContext dbContext) : ControllerBase
 
         entity.Name = name!;
         entity.PhoneNumber = normalized;
-        entity.TurmaId = req.TurmaId;
+        entity.TurmaId = await ResolveOwnedTurmaIdAsync(req.TurmaId, ownerUserId, cancellationToken);
         entity.IsActive = req.IsActive;
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -91,10 +81,8 @@ public class ContatosController(AppDbContext dbContext) : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<ActionResult> Delete(int id, CancellationToken cancellationToken)
     {
-        var companyId = GetCurrentCompanyId();
-        if (companyId is null) return Unauthorized();
-
-        var entity = await dbContext.Contatos.FirstOrDefaultAsync(c => c.Id == id && c.CompanyId == companyId.Value, cancellationToken);
+        var ownerUserId = this.GetCurrentUserId();
+        var entity = await dbContext.Contatos.FirstOrDefaultAsync(c => c.Id == id && c.OwnerUserId == ownerUserId, cancellationToken);
         if (entity is null) return NotFound();
 
         dbContext.Contatos.Remove(entity);
@@ -102,13 +90,22 @@ public class ContatosController(AppDbContext dbContext) : ControllerBase
         return NoContent();
     }
 
+    private async Task<int?> ResolveOwnedTurmaIdAsync(int? requestedTurmaId, int ownerUserId, CancellationToken cancellationToken)
+    {
+        if (requestedTurmaId is null)
+        {
+            return null;
+        }
+
+        var belongsToOwner = await dbContext.Turmas.AnyAsync(t => t.Id == requestedTurmaId.Value && t.OwnerUserId == ownerUserId, cancellationToken);
+        return belongsToOwner ? requestedTurmaId : null;
+    }
+
     [HttpPost("import-xml")]
     [Consumes("multipart/form-data")]
     public async Task<ActionResult> ImportXml([FromForm] IFormFile file, CancellationToken cancellationToken)
     {
-        var companyId = GetCurrentCompanyId();
-        if (companyId is null) return Unauthorized();
-
+        var ownerUserId = this.GetCurrentUserId();
         if (file is null || file.Length == 0)
         {
             return BadRequest("XML file is required.");
@@ -144,7 +141,7 @@ public class ContatosController(AppDbContext dbContext) : ControllerBase
 
         var turma = new Turma
         {
-            CompanyId = companyId.Value,
+            OwnerUserId = ownerUserId,
             Name = turmaName.Trim(),
             IsActive = true,
             CreatedAtUtc = DateTime.UtcNow
@@ -155,7 +152,7 @@ public class ContatosController(AppDbContext dbContext) : ControllerBase
 
         var contacts = importedContacts.Select(contact => new Contato
         {
-            CompanyId = companyId.Value,
+            OwnerUserId = ownerUserId,
             Name = contact.Name,
             PhoneNumber = contact.PhoneNumber,
             TurmaId = turma.Id,
@@ -276,9 +273,7 @@ public class ContatosController(AppDbContext dbContext) : ControllerBase
     [Consumes("multipart/form-data")]
     public async Task<ActionResult> ImportExcel([FromForm] IFormFile file, [FromForm] string turmaName, CancellationToken cancellationToken)
     {
-        var companyId = GetCurrentCompanyId();
-        if (companyId is null) return Unauthorized();
-
+        var ownerUserId = this.GetCurrentUserId();
         if (string.IsNullOrWhiteSpace(turmaName))
         {
             return BadRequest("TurmaName is required.");
@@ -330,7 +325,7 @@ public class ContatosController(AppDbContext dbContext) : ControllerBase
 
                 contacts.Add(new Contato
                 {
-                    CompanyId = companyId.Value,
+                    OwnerUserId = ownerUserId,
                     Name = name,
                     PhoneNumber = normalizedPhone,
                     IsActive = true,
@@ -347,7 +342,7 @@ public class ContatosController(AppDbContext dbContext) : ControllerBase
 
             var turma = new Turma
             {
-                CompanyId = companyId.Value,
+                OwnerUserId = ownerUserId,
                 Name = turmaName.Trim(),
                 IsActive = true,
                 CreatedAtUtc = DateTime.UtcNow

@@ -60,9 +60,12 @@
 /* ===== GRID DE REGRAS ===== */
 .rules-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 1.5rem;
   margin-top: 0.5rem;
+  /* "start" em vez de "stretch": cada card tem a altura do próprio conteúdo, não a do
+     vizinho mais alto da mesma linha — regras com pouca coisa não ficam esticadas à toa. */
+  align-items: start;
 }
 
 /* ===== CARD DE REGRA ===== */
@@ -201,6 +204,32 @@
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
+}
+
+.message-summary {
+  margin: 0 0 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #3f51b5;
+}
+
+.message-preview-compact {
+  background: #f8f9fa;
+  padding: 0.6rem 0.85rem;
+  border-radius: 8px;
+  border-left: 3px solid #667eea;
+  margin: 0;
+  color: #555;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.message-more {
+  color: #888;
+  font-weight: 600;
 }
 
 /* ===== BADGES DE CONFIGURAÇÃO ===== */
@@ -391,7 +420,13 @@
 .schedule-rule-page .form-section {
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(6px);
-  margin-bottom: 1.25rem;
+  margin-bottom: 1rem;
+  padding: 1.25rem 1.5rem 1.1rem;
+}
+
+.schedule-rule-page .schedule-columns .form-section {
+  margin-bottom: 0;
+  height: 100%;
 }
 
 .schedule-rule-page .form-section legend {
@@ -591,7 +626,7 @@
   font-size: 1.1rem;
   font-weight: 600;
   color: #1a1a2e;
-  margin-bottom: 1.5rem;
+  margin-bottom: 0.9rem;
   display: block;
   width: 100%;
   padding: 0;
@@ -783,6 +818,58 @@
   margin: 0.2rem 0;
 }
 
+/* ===== LAYOUT COMPACTO DO FORMULÁRIO DE REGRA ===== */
+.schedule-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.config-top-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.config-name-field {
+  flex: 1;
+  margin-bottom: 0 !important;
+}
+
+.config-active-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+  height: fit-content;
+}
+
+.config-active-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: #667eea;
+  cursor: pointer;
+}
+
+.messages-hint {
+  display: block;
+  margin-bottom: 10px;
+  color: #888;
+}
+
+.message-block-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
 /* ===== PREVIEW ===== */
 .rule-preview {
   background: #f8f9fa;
@@ -790,6 +877,12 @@
   border-radius: 10px;
   padding: 1.25rem 1.5rem;
   margin: 0 2rem 1.5rem;
+}
+
+.rule-preview.compact {
+  padding: 0.75rem 1.25rem;
+  font-size: 0.85rem;
+  color: #555;
 }
 
 .rule-preview h3 {
@@ -840,10 +933,207 @@
   border: 1px solid #fecaca;
 }
 
+/* ===== MODO (DENTRO/FORA DO HORÁRIO) ===== */
+.mode-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.mode-toggle-btn {
+  padding: 0.6rem 0.75rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 10px;
+  background: white;
+  color: #555;
+  font-weight: 600;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mode-toggle-btn:hover {
+  border-color: #b7c0ec;
+}
+
+.mode-toggle-btn.active {
+  border-color: #667eea;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.12), rgba(124, 58, 237, 0.08));
+  color: #3d3d92;
+}
+
+/* ===== GRADE SEMANAL ===== */
+.weekly-grid {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+}
+
+.weekly-day-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 0.45rem 0.75rem;
+  background: #fafbff;
+}
+
+.weekly-day-row.active {
+  border-color: #c7d2fe;
+  background: #f5f6ff;
+}
+
+.weekly-day-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-weight: 600;
+  color: #333;
+  min-width: 130px;
+  cursor: pointer;
+}
+
+.weekly-day-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: #667eea;
+  cursor: pointer;
+}
+
+.weekly-day-ranges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.time-range-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 0.3rem 0.5rem;
+}
+
+.time-range-row input[type="time"] {
+  border: none;
+  padding: 0.2rem;
+  font-size: 0.85rem;
+  width: auto;
+}
+
+.time-range-row span {
+  color: #888;
+  font-size: 0.8rem;
+}
+
+.range-remove {
+  border: none;
+  background: transparent;
+  color: #ef4444;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0 0.2rem;
+}
+
+.range-remove:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.range-add {
+  border: 1px dashed #b7c0ec;
+  background: transparent;
+  color: #667eea;
+  border-radius: 8px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+/* ===== MENSAGENS POR DIA ===== */
+.day-coverage {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.day-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  padding: 0.3rem 0.5rem;
+  border-radius: 20px;
+  background: #eef0f3;
+  color: #888;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.day-chip.covered {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.day-chip.clickable {
+  cursor: pointer;
+  background: white;
+  border: 1px solid #d9dfea;
+  color: #555;
+  transition: all 0.15s ease;
+}
+
+.day-chip.clickable:hover {
+  border-color: #667eea;
+}
+
+.day-chip.clickable.active {
+  background: #667eea;
+  border-color: #667eea;
+  color: white;
+}
+
+.message-block {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 0.7rem 0.85rem;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+}
+
+.message-block textarea {
+  min-height: unset;
+}
+
+.message-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.4rem;
+}
+
+.message-day-picker {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  margin-top: 0.4rem;
+}
+
 /* ===== RESPONSIVIDADE ===== */
 @media (max-width: 1024px) {
   .rules-grid {
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  }
+
+  .schedule-columns {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -855,6 +1145,11 @@
   .schedule-rule-page {
     padding-top: 1rem;
     padding-bottom: 1.5rem;
+  }
+
+  .config-top-row {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .schedule-rule-page .form-header {

@@ -11,7 +11,6 @@ namespace ApiBotWhatsapp.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            /*
             migrationBuilder.CreateTable(
                 name: "Companies",
                 columns: table => new
@@ -257,7 +256,6 @@ namespace ApiBotWhatsapp.Api.Migrations
 
             migrationBuilder.DropTable(
                 name: "Turmas");
-                */
         }
     }
 }

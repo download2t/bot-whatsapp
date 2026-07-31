@@ -4,13 +4,15 @@ public record ScheduleRuleTimeWindowRequest(int DayOfWeek, string StartTime, str
 
 public record ScheduleRuleTimeWindowResponse(int DayOfWeek, string DayName, string StartTime, string EndTime);
 
+public record ScheduleRuleMessageRequest(string Text, IReadOnlyList<int> Days);
+
+public record ScheduleRuleMessageResponse(string Text, IReadOnlyList<int> Days, IReadOnlyList<string> DayNames);
+
 public record ScheduleRuleRequest(
     string Name,
-    IReadOnlyList<string>? WhatsAppNumbers,
-    string? WhatsAppNumber,
     string StartTime,
     string EndTime,
-    string Message,
+    IReadOnlyList<ScheduleRuleMessageRequest> Messages,
     bool IsEnabled,
     int ThrottleMinutes = 0,
     bool IsOutOfBusinessHours = false,
@@ -20,11 +22,9 @@ public record ScheduleRuleRequest(
 public record ScheduleRuleResponse(
     int Id,
     string Name,
-    IReadOnlyList<string> WhatsAppNumbers,
-    string WhatsAppNumber,
     string StartTime,
     string EndTime,
-    string Message,
+    IReadOnlyList<ScheduleRuleMessageResponse> Messages,
     bool IsEnabled,
     int ThrottleMinutes,
     bool IsOutOfBusinessHours,

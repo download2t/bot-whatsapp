@@ -17,7 +17,7 @@ export function ProfilePage() {
     phone: "",
     cpf: "",
     fullName: "",
-    title: "Operador",
+    title: "",
   });
 
   useEffect(() => {
@@ -30,7 +30,7 @@ export function ProfilePage() {
           phone: me.phone || "",
           cpf: me.cpf || "",
           fullName: me.fullName || "",
-          title: me.title === "Gestor" ? "Gestor" : "Operador",
+          title: me.title || "",
         });
       } catch (error) {
         setMessageType("error");
@@ -52,17 +52,14 @@ export function ProfilePage() {
     setMessageType("info");
 
     try {
-      // Enviar o título atual para evitar erro de comparação com null no backend
       const payload = {
         username: form.username.trim(),
         email: form.email.trim() || null,
         phone: form.phone.trim() || null,
         cpf: form.cpf.trim() || null,
         fullName: form.fullName.trim() || null,
-        title: form.title, // Envia o título atual para o backend não reclamar
+        title: form.title.trim() || null,
       };
-
-      console.log("Enviando payload:", payload);
 
       const updated = await apiFetch<UserProfile>("/api/auth/profile", {
         method: "PUT",
@@ -75,7 +72,7 @@ export function ProfilePage() {
         phone: updated.phone || "",
         cpf: updated.cpf || "",
         fullName: updated.fullName || "",
-        title: updated.title === "Gestor" ? "Gestor" : "Operador",
+        title: updated.title || "",
       });
 
       localStorage.setItem("bot_user", updated.username);
@@ -89,15 +86,6 @@ export function ProfilePage() {
       if (error instanceof Error) {
         errorMessage = error.message;
 
-        // Tratar erro específico do título
-        if (
-          errorMessage.toLowerCase().includes("title") ||
-          errorMessage.toLowerCase().includes("cargo")
-        ) {
-          errorMessage = "Não é permitido alterar o cargo do próprio usuário.";
-        }
-
-        // Tratar erro de username duplicado
         if (errorMessage.toLowerCase().includes("username already exists")) {
           errorMessage = "Este nome de usuário já está em uso.";
         }
@@ -202,13 +190,14 @@ export function ProfilePage() {
           </div>
 
           <div className="form-group">
-            <label>Cargo</label>
+            <label>
+              Cargo <span className="optional">(opcional)</span>
+            </label>
             <input
               type="text"
               value={form.title}
-              disabled
-              readOnly
-              className="readonly-field"
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              placeholder="Ex: Atendente, Vendedor..."
             />
           </div>
 

@@ -11,13 +11,10 @@ namespace ApiBotWhatsapp.Api.Controllers;
 
 [ApiController]
 [Route("api/messages/bulk")]
-public class BulkMessagesController(AppDbContext dbContext, WhatsAppMessageSender sender) : ControllerBase
+public class BulkMessagesController(AppDbContext dbContext, WhatsAppMessageSender sender, WhatsAppBridgeClient bridgeClient, MediaStorageService mediaStorage) : ControllerBase
 {
-    private int? GetCurrentCompanyId()
-    {
-        var claim = User.FindFirst("company_id")?.Value;
-        return int.TryParse(claim, out var companyId) ? companyId : null;
-    }
+    // ~20MB binary encoded as base64 (base64 is ~4/3 the size of the raw bytes).
+    private const int MaxMediaBase64Length = 27_000_000;
 
     private static bool ShouldAbortBulk(string status)
     {
@@ -42,27 +39,29 @@ public class BulkMessagesController(AppDbContext dbContext, WhatsAppMessageSende
     }
 
     [HttpPost]
+    [RequestSizeLimit(40_000_000)]
     public async Task<ActionResult<IEnumerable<BulkSendResult>>> Send([FromBody] BulkSendRequest req, CancellationToken cancellationToken)
     {
-        var companyId = GetCurrentCompanyId();
-        if (companyId is null) return Unauthorized();
+        var ownerUserId = this.GetCurrentUserId();
+        var senderSessionId = $"user-{ownerUserId}";
+
+        if (!string.IsNullOrEmpty(req.MediaBase64) && req.MediaBase64.Length > MaxMediaBase64Length)
+        {
+            return BadRequest("Arquivo excede o limite de 20MB.");
+        }
 
         // Resolve contacts: prioritize explicit ContactIds, then fall back to TurmaId
-        IQueryable<Contato> contactsQuery;
-        
+        IQueryable<Contato> contactsQuery = dbContext.Contatos.Where(c => c.OwnerUserId == ownerUserId);
+
         if (req.ContactIds is not null && req.ContactIds.Count > 0)
         {
             // If ContactIds are explicitly provided, use only those
-            contactsQuery = dbContext.Contatos.Where(c => 
-                c.CompanyId == companyId.Value && 
-                req.ContactIds.Contains(c.Id));
+            contactsQuery = contactsQuery.Where(c => req.ContactIds.Contains(c.Id));
         }
         else if (req.TurmaId > 0)
         {
             // Otherwise, use all contacts from the turma
-            contactsQuery = dbContext.Contatos.Where(c => 
-                c.CompanyId == companyId.Value && 
-                c.TurmaId == req.TurmaId);
+            contactsQuery = contactsQuery.Where(c => c.TurmaId == req.TurmaId);
         }
         else
         {
@@ -105,7 +104,15 @@ public class BulkMessagesController(AppDbContext dbContext, WhatsAppMessageSende
 
                 var personalized = $"{greeting} {contact.Name}!\n{body}";
                 var normalizedPhone = PhoneNumberUtils.Normalize(contact.PhoneNumber);
-                var (success, status) = await sender.SendMessageAsync(normalizedPhone, personalized, req.MarkAsUnread, req.SourceWhatsAppNumber, cancellationToken);
+                var (success, status, _) = await sender.SendMessageAsync(
+                    normalizedPhone,
+                    personalized,
+                    req.MarkAsUnread,
+                    senderSessionId,
+                    cancellationToken,
+                    req.MediaBase64,
+                    req.MediaMimeType,
+                    req.MediaFileName);
 
                 if (success)
                 {
@@ -212,45 +219,65 @@ public class BulkMessagesController(AppDbContext dbContext, WhatsAppMessageSende
     }
 
     [HttpPost("send")]
+    [RequestSizeLimit(40_000_000)]
     public async Task<IActionResult> SendMessage(
         [FromBody] SendMessageRequest request,
-        [FromServices] ApiBotWhatsapp.Api.Services.WhatsAppMessageSender sender,
         CancellationToken cancellationToken)
     {
-        var companyId = GetCurrentCompanyId();
-        if (companyId is null) return Unauthorized("Company not found in token.");
+        var ownerUserId = this.GetCurrentUserId();
+        var senderSessionId = $"user-{ownerUserId}";
 
-        var targetPhone = request.PhoneNumber; 
-        var textMessage = request.Message;
+        var targetPhone = request.PhoneNumber;
+        var textMessage = request.Message ?? string.Empty;
+        var hasMedia = !string.IsNullOrEmpty(request.MediaBase64);
 
-        if (string.IsNullOrWhiteSpace(targetPhone) || string.IsNullOrWhiteSpace(textMessage))
+        if (string.IsNullOrWhiteSpace(targetPhone) || (string.IsNullOrWhiteSpace(textMessage) && !hasMedia))
         {
-            return BadRequest("Telefone e Mensagem são obrigatórios.");
+            return BadRequest("Telefone e (Mensagem ou Mídia) são obrigatórios.");
         }
 
-        var normalizedPhone = ApiBotWhatsapp.Api.Utils.PhoneNumberUtils.Normalize(targetPhone);
+        if (hasMedia && request.MediaBase64!.Length > MaxMediaBase64Length)
+        {
+            return BadRequest("Arquivo excede o limite de 20MB.");
+        }
 
-        var sourceNumber = request.GetType().GetProperty("SourceWhatsAppNumber") != null 
-            ? (string?)request.GetType().GetProperty("SourceWhatsAppNumber")?.GetValue(request, null) 
-            : null;
+        var normalizedPhone = PhoneNumberUtils.Normalize(targetPhone);
 
-        var (success, status) = await sender.SendMessageAsync(
-            normalizedPhone, 
-            textMessage, 
+        var (success, status, messageId) = await sender.SendMessageAsync(
+            normalizedPhone,
+            textMessage,
             false, // markAsUnread
-            sourceNumber, 
-            cancellationToken
+            senderSessionId,
+            cancellationToken,
+            request.MediaBase64,
+            request.MediaMimeType,
+            request.MediaFileName
         );
 
         if (!success) return BadRequest($"Falha ao enviar: {status}");
 
-        var log = new ApiBotWhatsapp.Api.Models.MessageLog
+        var myStatus = await bridgeClient.GetSessionStatusAsync(senderSessionId, cancellationToken);
+
+        // Save the exact file that was sent so it can be shown again in the chat history —
+        // before this, only a "[Mídia: filename]" text placeholder was kept and the actual
+        // image/video/document was discarded once the bridge call returned.
+        string? mediaUrl = null;
+        if (hasMedia)
         {
-            CompanyId = companyId.Value,
-            WhatsAppNumber = sourceNumber ?? string.Empty,
+            mediaUrl = mediaStorage.SaveBase64(ownerUserId, request.MediaBase64!, request.MediaMimeType, request.MediaFileName);
+        }
+
+        var log = new MessageLog
+        {
+            OwnerUserId = ownerUserId,
+            WhatsAppNumber = myStatus.PhoneNumber ?? string.Empty,
             PhoneNumber = normalizedPhone,
             Direction = "Outgoing",
             Content = textMessage,
+            MediaUrl = mediaUrl,
+            MediaMimeType = hasMedia ? request.MediaMimeType : null,
+            MediaFileName = hasMedia ? request.MediaFileName : null,
+            MessageId = messageId,
             TimestampUtc = DateTime.UtcNow,
             Status = "Sent",
             IsAutomatic = false

@@ -12,9 +12,11 @@ public record BulkSendRequest(
 	string Greeting,
 	string Message,
 	bool MarkAsUnread = false,
-	string? SourceWhatsAppNumber = null,
 	int IntervalSeconds = 60,
-	bool StreamUpdates = false);
+	bool StreamUpdates = false,
+	string? MediaBase64 = null,
+	string? MediaMimeType = null,
+	string? MediaFileName = null);
 public record BulkSendResult(int ContactId, string PhoneNumber, bool Success, string Status);
 
 public record BulkSendStreamEvent(

@@ -3,6 +3,7 @@ using System;
 using ApiBotWhatsapp.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ApiBotWhatsapp.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260731132421_AddOwnerUserIsolation")]
+    partial class AddOwnerUserIsolation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.3");
@@ -60,10 +63,6 @@ namespace ApiBotWhatsapp.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("AckStatus")
-                        .HasMaxLength(20)
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("ContactName")
                         .HasColumnType("TEXT");
 
@@ -79,18 +78,6 @@ namespace ApiBotWhatsapp.Api.Migrations
 
                     b.Property<bool>("IsAutomatic")
                         .HasColumnType("INTEGER");
-
-                    b.Property<string>("MediaFileName")
-                        .HasMaxLength(255)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("MediaMimeType")
-                        .HasMaxLength(150)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("MediaUrl")
-                        .HasMaxLength(300)
-                        .HasColumnType("TEXT");
 
                     b.Property<string>("MessageId")
                         .HasMaxLength(150)

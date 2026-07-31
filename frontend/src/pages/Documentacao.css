@@ -1,0 +1,230 @@
+.doc-page {
+  display: flex;
+  height: 90vh;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #d1d7db;
+  margin: 10px;
+}
+
+.doc-sidebar {
+  width: 320px;
+  min-width: 320px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #f2f2f2;
+  padding: 15px;
+  gap: 10px;
+}
+
+.doc-sidebar h2 {
+  margin: 0 0 5px;
+  font-size: 1.1rem;
+}
+
+.doc-sidebar input {
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #f0f2f5;
+}
+
+.doc-contact-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.doc-hint {
+  color: #667781;
+  font-size: 0.9rem;
+  padding: 10px 4px;
+}
+
+.doc-contact-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.doc-contact-item:hover {
+  background: #f5f6f6;
+}
+
+.doc-contact-item.active {
+  background: #e7f3ef;
+}
+
+.doc-contact-item strong {
+  font-size: 0.95rem;
+}
+
+.doc-contact-item span {
+  font-size: 0.8rem;
+  color: #667781;
+}
+
+.doc-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  overflow-y: auto;
+  gap: 14px;
+}
+
+.doc-empty {
+  margin: auto;
+  color: #667781;
+  text-align: center;
+  max-width: 320px;
+}
+
+.doc-main-header h3 {
+  margin: 0 0 4px;
+}
+
+.doc-main-header span {
+  font-size: 0.85rem;
+  color: #667781;
+}
+
+.doc-dates-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.doc-dates-toolbar button {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.doc-dates-toolbar button:hover {
+  background: #f5f6f6;
+}
+
+.doc-dates-count {
+  margin-left: auto;
+  font-size: 0.85rem;
+  color: #667781;
+}
+
+.doc-dates-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.doc-date-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.doc-date-checkbox.checked {
+  background: #d9fdd3;
+  border-color: #00a884;
+}
+
+.doc-date-checkbox small {
+  margin-left: auto;
+  color: #667781;
+}
+
+.doc-generate-btn {
+  align-self: flex-start;
+  padding: 10px 20px;
+  border-radius: 20px;
+  border: none;
+  background: #00a884;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.doc-generate-btn:hover:not(:disabled) {
+  background: #008f6f;
+}
+
+.doc-generate-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.doc-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 200px;
+}
+
+.doc-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.doc-result-header button {
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid #00a884;
+  background: #fff;
+  color: #00a884;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.doc-result-header button:hover {
+  background: #e7f3ef;
+}
+
+.doc-result textarea {
+  flex: 1;
+  min-height: 260px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  font-family: ui-monospace, "Courier New", monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  resize: vertical;
+}
+
+@media (max-width: 768px) {
+  .doc-page {
+    flex-direction: column;
+    height: auto;
+    margin: 0;
+    border-radius: 0;
+  }
+
+  .doc-sidebar {
+    width: 100%;
+    min-width: 0;
+    border-right: none;
+    border-bottom: 1px solid #f2f2f2;
+    max-height: 300px;
+  }
+}

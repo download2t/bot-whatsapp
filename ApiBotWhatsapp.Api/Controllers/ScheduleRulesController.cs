@@ -1,7 +1,7 @@
 using ApiBotWhatsapp.Api.Data;
 using ApiBotWhatsapp.Api.Dtos;
 using ApiBotWhatsapp.Api.Models;
-using ApiBotWhatsapp.Api.Services;
+using ApiBotWhatsapp.Api.Utils;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Globalization;
@@ -11,7 +11,7 @@ namespace ApiBotWhatsapp.Api.Controllers;
 
 [ApiController]
 [Route("api/schedule-rules")]
-public class ScheduleRulesController(AppDbContext dbContext, WhatsAppBridgeClient bridgeClient) : ControllerBase
+public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
 {
     private static readonly JsonSerializerOptions WindowsJsonOptions = new()
     {
@@ -28,12 +28,6 @@ public class ScheduleRulesController(AppDbContext dbContext, WhatsAppBridgeClien
         "Sexta-feira",
         "Sábado"
     ];
-
-    private int? GetCurrentCompanyId()
-    {
-        var claim = User.FindFirst("company_id")?.Value;
-        return int.TryParse(claim, out var companyId) ? companyId : null;
-    }
 
     private static string GetDayName(int dayOfWeek)
     {
@@ -137,62 +131,81 @@ public class ScheduleRulesController(AppDbContext dbContext, WhatsAppBridgeClien
         return JsonSerializer.Serialize(windows, WindowsJsonOptions);
     }
 
-    private async Task<bool> IsUserGestorOfCompanyAsync(int companyId, CancellationToken cancellationToken)
+    private static bool TryNormalizeMessages(
+        IReadOnlyList<ScheduleRuleMessageRequest>? messages,
+        out List<ScheduleRuleMessageRequest> normalized,
+        out string? error)
     {
-        // Admins têm acesso completo
-        var adminClaim = User.FindFirst("is_admin")?.Value;
-        if (string.Equals(adminClaim, "true", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
+        normalized = [];
+        error = null;
 
-        // Não admins: verificar se é Gestor
-        var userIdClaim = User.FindFirst("sub")?.Value;
-        if (!int.TryParse(userIdClaim, out var userId))
+        if (messages is not { Count: > 0 })
         {
+            error = "At least one message is required.";
             return false;
         }
 
-        var user = await dbContext.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
-        if (user is null || user.Title != "Gestor")
+        foreach (var message in messages)
         {
-            return false;
+            var text = message.Text?.Trim();
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                error = "Every message must have a non-empty text.";
+                return false;
+            }
+
+            var days = (message.Days ?? [])
+                .Where(day => day is >= 0 and <= 6)
+                .Distinct()
+                .OrderBy(day => day)
+                .ToList();
+
+            if (days.Count == 0)
+            {
+                error = "Every message must be linked to at least one day of the week.";
+                return false;
+            }
+
+            normalized.Add(new ScheduleRuleMessageRequest(text, days));
         }
 
-        // Verificar se está vinculado à empresa
-        var isLinked = await dbContext.UserCompanies.AnyAsync(
-            uc => uc.UserId == userId && uc.CompanyId == companyId,
-            cancellationToken);
+        return true;
+    }
 
-        return isLinked;
+    private static string SerializeMessages(IEnumerable<ScheduleRuleMessageRequest> messages)
+    {
+        return JsonSerializer.Serialize(messages, WindowsJsonOptions);
+    }
+
+    private static List<ScheduleRuleMessageRequest> GetRuleMessages(ScheduleRule rule)
+    {
+        if (string.IsNullOrWhiteSpace(rule.MessagesJson))
+        {
+            return [];
+        }
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<List<ScheduleRuleMessageRequest>>(rule.MessagesJson, WindowsJsonOptions);
+            return parsed ?? [];
+        }
+        catch
+        {
+            return [];
+        }
     }
 
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<ScheduleRuleResponse>>> GetAll([FromQuery] string? whatsAppNumber, CancellationToken cancellationToken)
+    public async Task<ActionResult<IEnumerable<ScheduleRuleResponse>>> GetAll(CancellationToken cancellationToken)
     {
-        var companyId = GetCurrentCompanyId();
-        if (companyId is null)
-        {
-            return Unauthorized("Company not found in token.");
-        }
+        var ownerUserId = this.GetCurrentUserId();
 
-        var query = dbContext.ScheduleRules.Where(rule => rule.CompanyId == companyId.Value);
-        if (!string.IsNullOrWhiteSpace(whatsAppNumber))
-        {
-            var normalized = new string(whatsAppNumber.Where(char.IsDigit).ToArray());
-            if (!string.IsNullOrWhiteSpace(normalized))
-            {
-                query = query.Where(rule =>
-                    dbContext.ScheduleRuleWhatsAppNumbers.Any(item => item.ScheduleRuleId == rule.Id && item.WhatsAppNumber == normalized)
-                    || (rule.WhatsAppNumber == normalized && !dbContext.ScheduleRuleWhatsAppNumbers.Any(item => item.ScheduleRuleId == rule.Id)));
-            }
-        }
-
-        var rules = await query
+        var rules = await dbContext.ScheduleRules
+            .Where(rule => rule.OwnerUserId == ownerUserId)
             .OrderBy(rule => rule.StartTime)
             .ToListAsync(cancellationToken);
 
-        var responses = await BuildResponsesAsync(rules, cancellationToken);
+        var responses = BuildResponses(rules);
 
         return Ok(responses);
     }
@@ -200,58 +213,40 @@ public class ScheduleRulesController(AppDbContext dbContext, WhatsAppBridgeClien
     [HttpGet("{id:int}")]
     public async Task<ActionResult<ScheduleRuleResponse>> GetById(int id, CancellationToken cancellationToken)
     {
-        var companyId = GetCurrentCompanyId();
-        if (companyId is null)
-        {
-            return Unauthorized("Company not found in token.");
-        }
+        var ownerUserId = this.GetCurrentUserId();
 
-        var rule = await dbContext.ScheduleRules.FirstOrDefaultAsync(item => item.Id == id && item.CompanyId == companyId.Value, cancellationToken);
+        var rule = await dbContext.ScheduleRules.FirstOrDefaultAsync(item => item.Id == id && item.OwnerUserId == ownerUserId, cancellationToken);
         if (rule is null)
         {
             return NotFound();
         }
 
-        var responses = await BuildResponsesAsync([rule], cancellationToken);
-        return Ok(responses[0]);
+        return Ok(BuildResponses([rule])[0]);
     }
 
     [HttpPost]
     public async Task<ActionResult<ScheduleRuleResponse>> Create([FromBody] ScheduleRuleRequest request, CancellationToken cancellationToken)
     {
-        var companyId = GetCurrentCompanyId();
-        if (companyId is null)
-        {
-            return Unauthorized("Company not found in token.");
-        }
-
-        // Only admins and gestores can create schedule rules
-        var isGestor = await IsUserGestorOfCompanyAsync(companyId.Value, cancellationToken);
-        if (!isGestor)
-        {
-            return Forbid("Only administrators and gestores can create schedule rules.");
-        }
+        var ownerUserId = this.GetCurrentUserId();
 
         if (!TryNormalizeWindows(request.Windows, request.StartTime, request.EndTime, out var normalizedWindows, out var windowError))
         {
             return BadRequest(windowError);
         }
 
-        var normalizedWhatsApps = NormalizeWhatsAppNumbers(request.WhatsAppNumbers, request.WhatsAppNumber);
-        if (normalizedWhatsApps.Count == 0)
+        if (!TryNormalizeMessages(request.Messages, out var normalizedMessages, out var messageError))
         {
-            return BadRequest("At least one WhatsApp number is required.");
+            return BadRequest(messageError);
         }
 
         var rule = new ScheduleRule
         {
-            CompanyId = companyId.Value,
+            OwnerUserId = ownerUserId,
             Name = request.Name.Trim(),
-            WhatsAppNumber = normalizedWhatsApps[0],
             StartTime = TimeSpan.ParseExact(normalizedWindows[0].StartTime, @"hh\:mm", CultureInfo.InvariantCulture),
             EndTime = TimeSpan.ParseExact(normalizedWindows[0].EndTime, @"hh\:mm", CultureInfo.InvariantCulture),
             ScheduleWindowsJson = SerializeWindows(normalizedWindows),
-            Message = request.Message.Trim(),
+            MessagesJson = SerializeMessages(normalizedMessages),
             IsEnabled = request.IsEnabled,
             ThrottleMinutes = request.ThrottleMinutes,
             IsOutOfBusinessHours = request.IsOutOfBusinessHours,
@@ -262,38 +257,15 @@ public class ScheduleRulesController(AppDbContext dbContext, WhatsAppBridgeClien
         dbContext.ScheduleRules.Add(rule);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var mappings = normalizedWhatsApps
-            .Select(item => new ScheduleRuleWhatsAppNumber
-            {
-                ScheduleRuleId = rule.Id,
-                WhatsAppNumber = item,
-            })
-            .ToList();
-        dbContext.ScheduleRuleWhatsAppNumbers.AddRange(mappings);
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        var responses = await BuildResponsesAsync([rule], cancellationToken);
-
-        return CreatedAtAction(nameof(GetById), new { id = rule.Id }, responses[0]);
+        return CreatedAtAction(nameof(GetById), new { id = rule.Id }, BuildResponses([rule])[0]);
     }
 
     [HttpPut("{id:int}")]
     public async Task<ActionResult<ScheduleRuleResponse>> Update(int id, [FromBody] ScheduleRuleRequest request, CancellationToken cancellationToken)
     {
-        var companyId = GetCurrentCompanyId();
-        if (companyId is null)
-        {
-            return Unauthorized("Company not found in token.");
-        }
+        var ownerUserId = this.GetCurrentUserId();
 
-        // Only admins and gestores can update schedule rules
-        var isGestor = await IsUserGestorOfCompanyAsync(companyId.Value, cancellationToken);
-        if (!isGestor)
-        {
-            return Forbid("Only administrators and gestores can update schedule rules.");
-        }
-
-        var rule = await dbContext.ScheduleRules.FirstOrDefaultAsync(item => item.Id == id && item.CompanyId == companyId.Value, cancellationToken);
+        var rule = await dbContext.ScheduleRules.FirstOrDefaultAsync(item => item.Id == id && item.OwnerUserId == ownerUserId, cancellationToken);
         if (rule is null)
         {
             return NotFound();
@@ -304,67 +276,34 @@ public class ScheduleRulesController(AppDbContext dbContext, WhatsAppBridgeClien
             return BadRequest(windowError);
         }
 
-        var normalizedWhatsApps = NormalizeWhatsAppNumbers(request.WhatsAppNumbers, request.WhatsAppNumber);
-        if (normalizedWhatsApps.Count == 0)
+        if (!TryNormalizeMessages(request.Messages, out var normalizedMessages, out var messageError))
         {
-            return BadRequest("At least one WhatsApp number is required.");
+            return BadRequest(messageError);
         }
 
         rule.Name = request.Name.Trim();
-        rule.WhatsAppNumber = normalizedWhatsApps[0];
         rule.StartTime = TimeSpan.ParseExact(normalizedWindows[0].StartTime, @"hh\:mm", CultureInfo.InvariantCulture);
         rule.EndTime = TimeSpan.ParseExact(normalizedWindows[0].EndTime, @"hh\:mm", CultureInfo.InvariantCulture);
         rule.ScheduleWindowsJson = SerializeWindows(normalizedWindows);
-        rule.Message = request.Message.Trim();
+        rule.MessagesJson = SerializeMessages(normalizedMessages);
         rule.IsEnabled = request.IsEnabled;
         rule.ThrottleMinutes = request.ThrottleMinutes;
         rule.IsOutOfBusinessHours = request.IsOutOfBusinessHours;
         rule.MaxDailyMessagesPerUser = request.MaxDailyMessagesPerUser;
 
-        var currentMappings = await dbContext.ScheduleRuleWhatsAppNumbers
-            .Where(item => item.ScheduleRuleId == rule.Id)
-            .ToListAsync(cancellationToken);
-        dbContext.ScheduleRuleWhatsAppNumbers.RemoveRange(currentMappings);
-        dbContext.ScheduleRuleWhatsAppNumbers.AddRange(
-            normalizedWhatsApps.Select(item => new ScheduleRuleWhatsAppNumber
-            {
-                ScheduleRuleId = rule.Id,
-                WhatsAppNumber = item,
-            }));
-
         await dbContext.SaveChangesAsync(cancellationToken);
-        var responses = await BuildResponsesAsync([rule], cancellationToken);
-        return Ok(responses[0]);
+        return Ok(BuildResponses([rule])[0]);
     }
 
     [HttpDelete("{id:int}")]
     public async Task<ActionResult> Delete(int id, CancellationToken cancellationToken)
     {
-        var companyId = GetCurrentCompanyId();
-        if (companyId is null)
-        {
-            return Unauthorized("Company not found in token.");
-        }
+        var ownerUserId = this.GetCurrentUserId();
 
-        // Only admins and gestores can delete schedule rules
-        var isGestor = await IsUserGestorOfCompanyAsync(companyId.Value, cancellationToken);
-        if (!isGestor)
-        {
-            return Forbid("Only administrators and gestores can delete schedule rules.");
-        }
-
-        var rule = await dbContext.ScheduleRules.FirstOrDefaultAsync(item => item.Id == id && item.CompanyId == companyId.Value, cancellationToken);
+        var rule = await dbContext.ScheduleRules.FirstOrDefaultAsync(item => item.Id == id && item.OwnerUserId == ownerUserId, cancellationToken);
         if (rule is null)
         {
             return NotFound();
-        }
-
-        var mappings = await dbContext.ScheduleRuleWhatsAppNumbers
-            .Where(item => item.ScheduleRuleId == rule.Id)
-            .ToListAsync(cancellationToken);
-        if (mappings.Count > 0)
-        {
-            dbContext.ScheduleRuleWhatsAppNumbers.RemoveRange(mappings);
         }
 
         dbContext.ScheduleRules.Remove(rule);
@@ -372,63 +311,11 @@ public class ScheduleRulesController(AppDbContext dbContext, WhatsAppBridgeClien
         return NoContent();
     }
 
-    [HttpGet("whatsapp-options")]
-    public async Task<ActionResult<WhatsAppFilterOptionsResponse>> GetWhatsAppOptions(CancellationToken cancellationToken)
+    private static List<ScheduleRuleResponse> BuildResponses(List<ScheduleRule> rules)
     {
-        var companyId = GetCurrentCompanyId();
-        if (companyId is null)
-        {
-            return Unauthorized("Company not found in token.");
-        }
-
-        var numbers = await dbContext.ScheduleRuleWhatsAppNumbers
-            .Where(item => dbContext.ScheduleRules.Any(rule => rule.Id == item.ScheduleRuleId && rule.CompanyId == companyId.Value))
-            .Select(item => item.WhatsAppNumber)
-            .ToListAsync(cancellationToken);
-
-        var legacyRuleNumbers = await dbContext.ScheduleRules
-            .Where(item => item.CompanyId == companyId.Value && item.WhatsAppNumber != string.Empty)
-            .Select(item => item.WhatsAppNumber)
-            .ToListAsync(cancellationToken);
-
-        var messageNumbers = await dbContext.MessageLogs
-            .Where(item => item.CompanyId == companyId.Value && item.WhatsAppNumber != string.Empty)
-            .Select(item => item.WhatsAppNumber)
-            .ToListAsync(cancellationToken);
-
-        numbers = numbers
-            .Concat(legacyRuleNumbers)
-            .Concat(messageNumbers)
-            .Concat((await bridgeClient.GetConnectionsAsync(cancellationToken))
-                .Where(item => item.IsConnected && !string.IsNullOrWhiteSpace(item.PhoneNumber))
-                .Select(item => item.PhoneNumber!))
-            .Distinct()
-            .OrderBy(item => item)
-            .ToList();
-
-        return Ok(new WhatsAppFilterOptionsResponse(numbers, null));
-    }
-
-    private async Task<List<ScheduleRuleResponse>> BuildResponsesAsync(List<ScheduleRule> rules, CancellationToken cancellationToken)
-    {
-        var ids = rules.Select(item => item.Id).ToList();
-        var mappings = await dbContext.ScheduleRuleWhatsAppNumbers
-            .Where(item => ids.Contains(item.ScheduleRuleId))
-            .ToListAsync(cancellationToken);
-
-        var mapByRule = mappings
-            .GroupBy(item => item.ScheduleRuleId)
-            .ToDictionary(
-                group => group.Key,
-                group => group.Select(item => item.WhatsAppNumber).Distinct().OrderBy(item => item).ToList());
-
         var responses = new List<ScheduleRuleResponse>(rules.Count);
         foreach (var rule in rules)
         {
-            var numbers = mapByRule.TryGetValue(rule.Id, out var mapped)
-                ? mapped
-                : [rule.WhatsAppNumber];
-
             var windows = GetRuleWindows(rule)
                 .Select(window => new ScheduleRuleTimeWindowResponse(
                     window.DayOfWeek,
@@ -437,14 +324,19 @@ public class ScheduleRulesController(AppDbContext dbContext, WhatsAppBridgeClien
                     window.EndTime))
                 .ToList();
 
+            var messages = GetRuleMessages(rule)
+                .Select(message => new ScheduleRuleMessageResponse(
+                    message.Text,
+                    message.Days,
+                    message.Days.Select(GetDayName).ToList()))
+                .ToList();
+
             responses.Add(new ScheduleRuleResponse(
                 rule.Id,
                 rule.Name,
-                numbers,
-                numbers.FirstOrDefault() ?? rule.WhatsAppNumber,
                 windows.FirstOrDefault()?.StartTime ?? rule.StartTime.ToString(@"hh\:mm"),
                 windows.FirstOrDefault()?.EndTime ?? rule.EndTime.ToString(@"hh\:mm"),
-                rule.Message,
+                messages,
                 rule.IsEnabled,
                 rule.ThrottleMinutes,
                 rule.IsOutOfBusinessHours,
@@ -454,33 +346,5 @@ public class ScheduleRulesController(AppDbContext dbContext, WhatsAppBridgeClien
         }
 
         return responses;
-    }
-
-    private static List<string> NormalizeWhatsAppNumbers(IReadOnlyList<string>? numbers, string? legacyNumber)
-    {
-        var normalized = new List<string>();
-
-        if (numbers is not null)
-        {
-            foreach (var number in numbers)
-            {
-                var digits = new string((number ?? string.Empty).Where(char.IsDigit).ToArray());
-                if (!string.IsNullOrWhiteSpace(digits))
-                {
-                    normalized.Add(digits);
-                }
-            }
-        }
-
-        if (normalized.Count == 0)
-        {
-            var legacyDigits = new string((legacyNumber ?? string.Empty).Where(char.IsDigit).ToArray());
-            if (!string.IsNullOrWhiteSpace(legacyDigits))
-            {
-                normalized.Add(legacyDigits);
-            }
-        }
-
-        return normalized.Distinct().OrderBy(item => item).ToList();
     }
 }

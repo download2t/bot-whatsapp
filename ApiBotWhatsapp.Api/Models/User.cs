@@ -6,8 +6,6 @@ public class User
 {
     public int Id { get; set; }
 
-    public int CompanyId { get; set; }
-
     public bool IsAdmin { get; set; }
 
     [Required]

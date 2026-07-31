@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
 import type { UserProfile } from '../types'
 import './UserForm.css'
@@ -7,10 +7,7 @@ import './UserForm.css'
 export function UserForm() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
   const isNew = !id || id === 'new'
-  const selectedCompanyId = Number(searchParams.get('companyId') || '0')
-  const companyQuery = selectedCompanyId > 0 ? `?companyId=${selectedCompanyId}` : ''
 
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
@@ -24,8 +21,7 @@ export function UserForm() {
     phone: '',
     cpf: '',
     fullName: '',
-    title: 'Operador',
-    linkToCurrentCompany: true,
+    title: '',
     isAdmin: false
   })
 
@@ -38,7 +34,7 @@ export function UserForm() {
   const loadUser = async (userId: number) => {
     try {
       setLoading(true)
-      const data = await apiFetch<UserProfile>(`/api/users/${userId}${companyQuery}`)
+      const data = await apiFetch<UserProfile>(`/api/users/${userId}`)
       setForm({
         username: data.username,
         password: '',
@@ -46,8 +42,7 @@ export function UserForm() {
         phone: data.phone || '',
         cpf: data.cpf || '',
         fullName: data.fullName || '',
-        title: data.title === 'Gestor' ? 'Gestor' : 'Operador',
-        linkToCurrentCompany: true,
+        title: data.title || '',
         isAdmin: data.isAdmin === true
       })
       setError(null)
@@ -75,7 +70,7 @@ export function UserForm() {
     setSaving(true)
     try {
       if (isNew) {
-        await apiFetch(`/api/users${companyQuery}`, {
+        await apiFetch('/api/users', {
           method: 'POST',
           body: JSON.stringify({
             username: form.username.trim(),
@@ -85,13 +80,12 @@ export function UserForm() {
             cpf: form.cpf.trim() || null,
             fullName: form.fullName.trim() || null,
             title: form.title || null,
-            linkToCurrentCompany: isCurrentUserAdmin ? form.linkToCurrentCompany : true,
             isAdmin: isCurrentUserAdmin ? form.isAdmin : false
           })
         })
         alert('Usuário criado com sucesso')
       } else {
-        await apiFetch(`/api/users/${id}${companyQuery}`, {
+        await apiFetch(`/api/users/${id}`, {
           method: 'PUT',
           body: JSON.stringify({
             username: form.username.trim(),
@@ -105,7 +99,7 @@ export function UserForm() {
         })
         alert('Usuário atualizado com sucesso')
       }
-      navigate(isCurrentUserAdmin && selectedCompanyId > 0 ? `/users?companyId=${selectedCompanyId}` : '/users')
+      navigate('/users')
     } catch (err) {
       console.error('Erro:', err)
       alert('Falha ao salvar usuário')
@@ -188,40 +182,26 @@ export function UserForm() {
 
         <div className="form-group">
           <label>Cargo/Título</label>
-          <select
+          <input
+            type="text"
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })}
-          >
-            <option value="Gestor">Gestor</option>
-            <option value="Operador">Operador</option>
-          </select>
+            placeholder="Ex: Atendente, Vendedor..."
+          />
         </div>
 
-        {isNew && isCurrentUserAdmin && (
+        {isCurrentUserAdmin && (
           <div className="form-group checkbox-row">
             <label>
               <input
                 type="checkbox"
-                checked={form.linkToCurrentCompany}
-                onChange={(e) => setForm({ ...form, linkToCurrentCompany: e.target.checked })}
+                checked={form.isAdmin}
+                onChange={(e) => setForm({ ...form, isAdmin: e.target.checked })}
               />
-              Vincular automaticamente à empresa atual
+              Usuário administrador
             </label>
           </div>
         )}
-
-          {isCurrentUserAdmin && (
-            <div className="form-group checkbox-row">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={form.isAdmin}
-                  onChange={(e) => setForm({ ...form, isAdmin: e.target.checked })}
-                />
-                Usuário administrador
-              </label>
-            </div>
-          )}
 
         <div className="form-actions">
           <button type="submit" disabled={saving} className="btn btn-primary">
@@ -229,7 +209,7 @@ export function UserForm() {
           </button>
           <button
             type="button"
-            onClick={() => navigate(isCurrentUserAdmin && selectedCompanyId > 0 ? `/users?companyId=${selectedCompanyId}` : '/users')}
+            onClick={() => navigate('/users')}
             className="btn btn-secondary"
           >
             Cancelar

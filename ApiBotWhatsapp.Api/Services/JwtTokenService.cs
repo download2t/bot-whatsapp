@@ -8,11 +8,7 @@ namespace ApiBotWhatsapp.Api.Services;
 
 public class JwtTokenService(IConfiguration configuration)
 {
-    public (string Token, DateTime ExpiresAtUtc) GenerateToken(
-        User user,
-        int? activeCompanyId = null,
-        string? activeCompanyName = null,
-        string? activeCompanyCode = null)
+    public (string Token, DateTime ExpiresAtUtc) GenerateToken(User user)
     {
         var jwtSection = configuration.GetSection("Jwt");
         var issuer = jwtSection["Issuer"] ?? throw new InvalidOperationException("Missing Jwt:Issuer");
@@ -32,21 +28,6 @@ public class JwtTokenService(IConfiguration configuration)
             new(ClaimTypes.Name, user.Username),
             new("is_admin", user.IsAdmin ? "true" : "false")
         };
-
-        if (activeCompanyId is not null)
-        {
-            claims.Add(new Claim("company_id", activeCompanyId.Value.ToString()));
-
-            if (!string.IsNullOrWhiteSpace(activeCompanyName))
-            {
-                claims.Add(new Claim("company_name", activeCompanyName));
-            }
-
-            if (!string.IsNullOrWhiteSpace(activeCompanyCode))
-            {
-                claims.Add(new Claim("company_code", activeCompanyCode));
-            }
-        }
 
         var token = new JwtSecurityToken(
             issuer,

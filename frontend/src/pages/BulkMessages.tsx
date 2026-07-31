@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch, getApiBase, getAuthHeaders } from '../lib/api'
 import type { BulkSendStreamEvent, Contato, Turma } from '../types'
 import { Card, CardHeader, CardTitle, Badge, EmptyState } from '../components/UI'
+import { EmojiPicker } from '../components/EmojiPicker'
+import { MediaAttachment, type SelectedMedia } from '../components/MediaAttachment'
 import '../styles/modern.css'
 
 type RowStatus = 'pending' | 'sending' | 'sent' | 'failed' | 'skipped'
@@ -65,6 +67,28 @@ export function BulkMessages() {
   const [rows, setRows] = useState<Record<number, RowState>>({})
   const [summary, setSummary] = useState<SendSummary | null>(null)
   const [currentContactName, setCurrentContactName] = useState<string | null>(null)
+  const [media, setMedia] = useState<SelectedMedia | null>(null)
+  const [mediaResetKey, setMediaResetKey] = useState(0)
+  const messageRef = useRef<HTMLTextAreaElement>(null)
+
+  const insertEmoji = (emoji: string) => {
+    const textarea = messageRef.current
+    if (!textarea) {
+      setMessage((current) => current + emoji)
+      return
+    }
+
+    const start = textarea.selectionStart ?? message.length
+    const end = textarea.selectionEnd ?? message.length
+    const next = message.slice(0, start) + emoji + message.slice(end)
+    setMessage(next)
+
+    requestAnimationFrame(() => {
+      textarea.focus()
+      const cursor = start + emoji.length
+      textarea.setSelectionRange(cursor, cursor)
+    })
+  }
 
   useEffect(() => {
     void (async () => {
@@ -255,6 +279,9 @@ export function BulkMessages() {
           message,
           intervalSeconds,
           streamUpdates: true,
+          mediaBase64: media?.base64 ?? null,
+          mediaMimeType: media?.mimeType ?? null,
+          mediaFileName: media?.fileName ?? null,
         }),
       })
 
@@ -440,6 +467,7 @@ export function BulkMessages() {
                   <label htmlFor="messageBody">📝 Corpo da Mensagem</label>
                   <textarea
                     id="messageBody"
+                    ref={messageRef}
                     value={message}
                     onChange={e => setMessage(e.target.value)}
                     placeholder="Digite sua mensagem aqui..."
@@ -449,6 +477,11 @@ export function BulkMessages() {
                   <small style={{ display: 'block', marginTop: '4px', color: '#666' }}>
                     Formato final: "[Saudação] [Nome]!\n[Sua mensagem]"
                   </small>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '12px' }}>
+                    <EmojiPicker onSelect={insertEmoji} disabled={sending} />
+                    <MediaAttachment key={mediaResetKey} onChange={setMedia} disabled={sending} />
+                  </div>
                 </div>
               </Card>
 
@@ -471,6 +504,16 @@ export function BulkMessages() {
                   {'\n'}
                   {message}
                 </div>
+                {media && (
+                  <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    {media.previewUrl ? (
+                      <img src={media.previewUrl} alt={media.fileName} style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6 }} />
+                    ) : (
+                      <div style={{ width: 56, height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#e5e7eb', borderRadius: 6, fontSize: 24 }}>📄</div>
+                    )}
+                    <span style={{ fontSize: '13px', color: '#374151' }}>Anexo: {media.fileName}</span>
+                  </div>
+                )}
               </Card>
 
               <div style={{ marginBottom: '24px' }}>
@@ -585,6 +628,8 @@ export function BulkMessages() {
                 setCurrentContactName(null)
                 setGreeting('Bom dia')
                 setMessage('')
+                setMedia(null)
+                setMediaResetKey((key) => key + 1)
               }}
               disabled={sending}
             >

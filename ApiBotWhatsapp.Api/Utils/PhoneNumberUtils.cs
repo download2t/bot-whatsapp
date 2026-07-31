@@ -8,6 +8,20 @@ public static class PhoneNumberUtils
         return new string(digits);
     }
 
+    /// <summary>
+    /// The last N digits of a phone number (default 8, a typical local-number length).
+    /// Used to match contacts regardless of country code / "9" mobile prefix differences
+    /// between how a number was typed into Contatos and how WhatsApp reports it on a webhook
+    /// (WhatsApp always includes the full country code; people often don't when typing a
+    /// contact). Comparing by suffix instead of exact string absorbs both problems generically,
+    /// for any country, without needing per-country formatting rules.
+    /// </summary>
+    public static string CoreDigits(string? value, int length = 8)
+    {
+        var digits = Normalize(value);
+        return digits.Length <= length ? digits : digits[^length..];
+    }
+
     public static string[] GetEquivalentBrazilianNumbers(string? value)
     {
         var normalized = Normalize(value);

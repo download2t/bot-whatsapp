@@ -1,19 +1,42 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
 import type { Contato, Turma } from '../types'
 import { Card, Badge, EmptyState } from '../components/UI'
 import '../styles/modern.css'
 
+type StatusFilter = 'all' | 'active' | 'inactive'
+
 export function ContatosList() {
   const [items, setItems] = useState<Contato[]>([])
   const [turmas, setTurmas] = useState<Turma[]>([])
   const [loading, setLoading] = useState(true)
-  const [filterName, setFilterName] = useState('')
-  const [filterPhone, setFilterPhone] = useState('')
-  const [filterTurma, setFilterTurma] = useState<number | ''>('')
-  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all')
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const filterName = searchParams.get('name') ?? ''
+  const filterPhone = searchParams.get('phone') ?? ''
+  const filterTurma = searchParams.get('turmaId') ? Number(searchParams.get('turmaId')) : ''
+  const filterStatus = (searchParams.get('status') as StatusFilter) || 'all'
+
+  const updateFilter = (key: string, value: string) => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      if (value) {
+        next.set(key, value)
+      } else {
+        next.delete(key)
+      }
+      return next
+    })
+  }
+
+  const setFilterName = (value: string) => updateFilter('name', value)
+  const setFilterPhone = (value: string) => updateFilter('phone', value)
+  const setFilterTurma = (value: number | '') => updateFilter('turmaId', value === '' ? '' : String(value))
+  const setFilterStatus = (value: StatusFilter) => updateFilter('status', value === 'all' ? '' : value)
+
+  const clearFilters = () => setSearchParams(new URLSearchParams())
 
   const load = async () => {
     try {
@@ -107,9 +130,9 @@ export function ContatosList() {
         </div>
 
         <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
-          <button 
-            className="btn btn-secondary" 
-            onClick={() => { setFilterName(''); setFilterPhone(''); setFilterTurma(''); setFilterStatus('all'); }}
+          <button
+            className="btn btn-secondary"
+            onClick={clearFilters}
           >
             🔄 Limpar Filtros
           </button>

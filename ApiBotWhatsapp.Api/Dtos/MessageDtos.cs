@@ -2,7 +2,6 @@ namespace ApiBotWhatsapp.Api.Dtos;
 
 public record MessageLogResponse(
     int Id,
-    int CompanyId,
     string WhatsAppNumber,
     string Direction,
     string PhoneNumber,
@@ -10,7 +9,11 @@ public record MessageLogResponse(
     string Content,
     bool IsAutomatic,
     string Status,
-    DateTime TimestampUtc);
+    DateTime TimestampUtc,
+    string? MediaUrl = null,
+    string? MediaMimeType = null,
+    string? MediaFileName = null,
+    string? AckStatus = null);
     
 
 // Os outros records permanecem inalterados
@@ -27,5 +30,3 @@ public record DashboardStatusResponse(
     int TodayIncoming,
     int TodayOutgoing,
     int TodayAutomatic);
-
-public record WhatsAppFilterOptionsResponse(IReadOnlyList<string> Numbers, string? FixedNumber);

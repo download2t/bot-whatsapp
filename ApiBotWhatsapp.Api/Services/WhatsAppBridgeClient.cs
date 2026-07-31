@@ -35,33 +35,21 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
         }
     }
 
-    public async Task<WhatsAppConnectionStatusResponse?> GetStatusAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// Status of one specific session (a single user's own WhatsApp connection), never any other
+    /// connected session. Returns a "not connected" status if that session doesn't exist yet.
+    /// </summary>
+    public async Task<WhatsAppConnectionStatusResponse> GetSessionStatusAsync(string sessionId, CancellationToken cancellationToken)
     {
-        try
-        {
-            var connections = await GetConnectionsAsync(cancellationToken);
-            if (connections.Count > 0)
-            {
-                var selected = connections.FirstOrDefault(item => item.IsConnected)
-                    ?? connections[0];
+        var connections = await GetConnectionsAsync(cancellationToken);
+        var mine = connections.FirstOrDefault(item => item.Id == sessionId);
 
-                return new WhatsAppConnectionStatusResponse(
-                    selected.Status,
-                    selected.IsConnected,
-                    selected.HasQr,
-                    true,
-                    selected.PhoneNumber,
-                    selected.LastError);
-            }
-
-            return await _client.GetFromJsonAsync<WhatsAppConnectionStatusResponse>(
-                $"{BaseUrl}/session/status",
-                cancellationToken);
-        }
-        catch
+        if (mine is null)
         {
-            return null;
+            return new WhatsAppConnectionStatusResponse("not-connected", false, false, true, null, null);
         }
+
+        return new WhatsAppConnectionStatusResponse(mine.Status, mine.IsConnected, mine.HasQr, true, mine.PhoneNumber, mine.LastError);
     }
 
     public async Task<string?> GetQrAsync(string? sessionId, CancellationToken cancellationToken)
@@ -86,25 +74,6 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
 
         var payload = await response.Content.ReadFromJsonAsync<WhatsAppQrResponse>(cancellationToken: cancellationToken);
         return payload?.QrDataUrl;
-    }
-
-    public async Task<string?> CreateConnectionAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            var response = await _client.PostAsync($"{BaseUrl}/session/create", null, cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                return null;
-            }
-
-            var payload = await response.Content.ReadFromJsonAsync<WhatsAppCreateConnectionResponse>(cancellationToken: cancellationToken);
-            return payload?.Id;
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     public async Task<bool> ConnectAsync(string? sessionId, CancellationToken cancellationToken)
@@ -139,7 +108,7 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
         }
     }
 
-    public async Task<string?> GetPairingCodeAsync(string phoneNumber, string? sessionId, CancellationToken cancellationToken)
+    public async Task<(string? PairingCode, string? Error)> GetPairingCodeAsync(string phoneNumber, string? sessionId, CancellationToken cancellationToken)
     {
         try
         {
@@ -153,19 +122,62 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
 
             if (!response.IsSuccessStatusCode)
             {
-                return null;
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                return (null, string.IsNullOrWhiteSpace(body) ? $"Bridge returned {(int)response.StatusCode}." : body);
             }
 
             var payload = await response.Content.ReadFromJsonAsync<WhatsAppPairingCodeResponse>(cancellationToken: cancellationToken);
-            return payload?.PairingCode;
+            return (payload?.PairingCode, null);
         }
-        catch
+        catch (Exception ex)
         {
-            return null;
+            return (null, $"Bridge unavailable: {ex.Message}");
         }
     }
 
-    public async Task<(bool Success, string Status)> SendMessageAsync(string phoneNumber, string message, bool markAsUnread, string? sourceWhatsAppNumber, CancellationToken cancellationToken)
+    /// <summary>
+    /// For each given phone number, asks the bridge what WhatsApp id (WID) it currently uses
+    /// for that contact (could be "...@c.us" or "...@lid"). Used to match an incoming
+    /// LID-addressed sender against registered Contatos by reverse lookup.
+    /// </summary>
+    public async Task<IReadOnlyList<ResolveWidItem>> ResolveWidsAsync(string sessionId, IReadOnlyList<string> phoneNumbers, CancellationToken cancellationToken)
+    {
+        if (phoneNumbers.Count == 0)
+        {
+            return [];
+        }
+
+        try
+        {
+            var sessionPath = Uri.EscapeDataString(sessionId);
+            var response = await _client.PostAsJsonAsync(
+                $"{BaseUrl}/session/{sessionPath}/resolve-wid",
+                new { phoneNumbers },
+                cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return [];
+            }
+
+            var payload = await response.Content.ReadFromJsonAsync<List<ResolveWidItem>>(cancellationToken: cancellationToken);
+            return payload ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    public async Task<(bool Success, string Status, string? MessageId)> SendMessageAsync(
+        string phoneNumber,
+        string message,
+        bool markAsUnread,
+        string senderSessionId,
+        CancellationToken cancellationToken,
+        string? mediaBase64 = null,
+        string? mediaMimeType = null,
+        string? mediaFileName = null)
     {
         HttpResponseMessage response;
         try
@@ -177,21 +189,27 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
                     phoneNumber,
                     message,
                     markAsUnread,
-                    sourceWhatsAppNumber
+                    sessionId = senderSessionId,
+                    mediaBase64,
+                    mediaMimeType,
+                    mediaFileName
                 },
                 cancellationToken);
         }
         catch (Exception ex)
         {
-            return (false, $"Bridge unavailable: {ex.Message}");
+            return (false, $"Bridge unavailable: {ex.Message}", null);
         }
 
         if (response.IsSuccessStatusCode)
         {
-            return (true, "Message sent through WhatsApp bridge.");
+            var payload = await response.Content.ReadFromJsonAsync<SendMessageBridgeResponse>(cancellationToken: cancellationToken);
+            return (true, "Message sent through WhatsApp bridge.", payload?.MessageId);
         }
 
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        return (false, string.IsNullOrWhiteSpace(body) ? $"Bridge returned {(int)response.StatusCode}." : body);
+        return (false, string.IsNullOrWhiteSpace(body) ? $"Bridge returned {(int)response.StatusCode}." : body, null);
     }
+
+    private record SendMessageBridgeResponse(bool Success, string? SessionId, string? SourceWhatsAppNumber, string? MessageId, bool UnreadApplied);
 }

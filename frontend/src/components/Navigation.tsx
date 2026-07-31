@@ -1,10 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { apiFetch } from "../lib/api";
-import type {
-  WhatsAppConnectionItem,
-  WhatsAppConnectionStatus,
-} from "../types";
+import type { WhatsAppConnectionStatus } from "../types";
 import "./Navigation.css";
 
 type NavigationProps = {
@@ -22,23 +19,15 @@ export function Navigation({
 }: NavigationProps) {
   const navigate = useNavigate();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [isNavOpen, setIsNavOpen] = useState(false);
   const [status, setStatus] = useState<WhatsAppConnectionStatus | null>(null);
-  const [connections, setConnections] = useState<WhatsAppConnectionItem[]>([]);
 
   const profileMenuRef = useRef<HTMLLIElement | null>(null);
-  const adminMenuRef = useRef<HTMLLIElement | null>(null);
 
   const userInitial = username.trim().charAt(0).toUpperCase() || "U";
-  const connectedConnections = useMemo(
-    () => connections.filter((item) => item.isConnected),
-    [connections],
-  );
 
   const closeMenus = () => {
     setIsMenuOpen(false);
-    setIsAdminMenuOpen(false);
     setIsNavOpen(false);
   };
 
@@ -82,23 +71,10 @@ export function Navigation({
     }
   };
 
-  const loadConnections = async () => {
-    try {
-      const data = await apiFetch<WhatsAppConnectionItem[]>(
-        "/api/whatsapp/connections",
-      );
-      setConnections(data);
-    } catch {
-      // Keep menu usable
-    }
-  };
-
   useEffect(() => {
     void loadStatus();
-    void loadConnections();
     const interval = window.setInterval(() => {
       void loadStatus();
-      void loadConnections();
     }, 10000);
 
     return () => window.clearInterval(interval);
@@ -108,7 +84,6 @@ export function Navigation({
     const onClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
       if (!profileMenuRef.current?.contains(target)) setIsMenuOpen(false);
-      if (!adminMenuRef.current?.contains(target)) setIsAdminMenuOpen(false);
     };
 
     document.addEventListener("mousedown", onClickOutside);
@@ -142,100 +117,72 @@ export function Navigation({
         </button>
 
         <ul className={`nav-menu ${isNavOpen ? "open" : ""}`}>
-          {(isAdmin || userTitle === "Gestor") && (
-            <li className="nav-item has-dropdown" ref={adminMenuRef}>
+          <li className="nav-item">
+            <button
+              className="nav-trigger"
+              onClick={() => {
+                navigate("/messages");
+                closeMenus();
+              }}
+            >
+              Mensagens
+            </button>
+          </li>
+          <li className="nav-item">
+            <button
+              className="nav-trigger"
+              onClick={() => {
+                navigate("/rules");
+                closeMenus();
+              }}
+            >
+              Regras de Negócio
+            </button>
+          </li>
+          <li className="nav-item">
+            <button
+              className="nav-trigger"
+              onClick={() => {
+                navigate("/turmas");
+                closeMenus();
+              }}
+            >
+              Turmas
+            </button>
+          </li>
+          <li className="nav-item">
+            <button
+              className="nav-trigger"
+              onClick={() => {
+                navigate("/contatos");
+                closeMenus();
+              }}
+            >
+              Contatos
+            </button>
+          </li>
+          <li className="nav-item">
+            <button
+              className="nav-trigger"
+              onClick={() => {
+                navigate("/documentacao");
+                closeMenus();
+              }}
+            >
+              Documentar Conversa
+            </button>
+          </li>
+          {isAdmin && (
+            <li className="nav-item">
               <button
-                className={`nav-trigger ${isAdminMenuOpen ? "active" : ""}`}
-                onClick={() => setIsAdminMenuOpen(!isAdminMenuOpen)}
+                className="nav-trigger"
+                onClick={() => {
+                  navigate("/users");
+                  closeMenus();
+                }}
               >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z" />
-                  <path d="M12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z" />
-                  <path d="M12 2v2" />
-                  <path d="M12 20v2" />
-                  <path d="m4.93 4.93 1.41 1.41" />
-                  <path d="m17.66 17.66 1.41 1.41" />
-                  <path d="M2 12h2" />
-                  <path d="M20 12h2" />
-                  <path d="m6.34 17.66-1.41 1.41" />
-                  <path d="m19.07 4.93-1.41 1.41" />
-                </svg>
-                Administração
-                <span className="caret">▾</span>
+                Usuários
               </button>
-
-              {isAdminMenuOpen && (
-                <div className="dropdown-menu">
-                  <div className="dropdown-group">
-                    <button
-                      className="dropdown-item"
-                      onClick={() => {
-                        navigate("/rules");
-                        closeMenus();
-                      }}
-                    >
-                      Regras de Negócio
-                    </button>
-                    <button
-                      className="dropdown-item"
-                      onClick={() => {
-                        navigate("/whitelist");
-                        closeMenus();
-                      }}
-                    >
-                      White List
-                    </button>
-                    <button
-                      className="dropdown-item"
-                      onClick={() => {
-                        navigate("/users");
-                        closeMenus();
-                      }}
-                    >
-                      Gestão de Usuários
-                    </button>
-                  </div>
-                  <div className="dropdown-divider"></div>
-                  <div className="dropdown-group">
-                    <button
-                      className="dropdown-item"
-                      onClick={() => {
-                        navigate("/turmas");
-                        closeMenus();
-                      }}
-                    >
-                      Turmas
-                    </button>
-                    <button
-                      className="dropdown-item"
-                      onClick={() => {
-                        navigate("/contatos");
-                        closeMenus();
-                      }}
-                    >
-                      Contatos
-                    </button>
-                    <button
-                      className="dropdown-item"
-                      onClick={() => {
-                        navigate("/messages");
-                        closeMenus();
-                      }}
-                    >
-                      Mensagens
-                    </button>
-                  </div>
-                </div>
-              )}
             </li>
           )}
 
@@ -296,7 +243,7 @@ export function Navigation({
                       closeMenus();
                     }}
                   >
-                    Gerenciar Dispositivos
+                    Meu WhatsApp
                   </button>
                 </div>
 
@@ -305,37 +252,23 @@ export function Navigation({
                 <div className="status-section">
                   <span className="section-title">Status do WhatsApp</span>
                   <div className="connection-list">
-                    {connectedConnections.length > 0 ? (
-                      connectedConnections.map((connection) => (
-                        <div key={connection.id} className="connection-item">
-                          <div className="connection-info">
-                            <span className="status-dot success"></span>
-                            <span className="phone-number">
-                              {formatPhone(connection.phoneNumber)}
-                            </span>
-                          </div>
-                          <span className="badge badge-success">Online</span>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="connection-item">
-                        <div className="connection-info">
-                          <span
-                            className={`status-dot ${status?.isConnected ? "success" : "error"}`}
-                          ></span>
-                          <span className="phone-number">
-                            {status?.phoneNumber
-                              ? formatPhone(status.phoneNumber)
-                              : "Nenhum aparelho"}
-                          </span>
-                        </div>
+                    <div className="connection-item">
+                      <div className="connection-info">
                         <span
-                          className={`badge ${status?.isConnected ? "badge-success" : "badge-error"}`}
-                        >
-                          {connectionLabel}
+                          className={`status-dot ${status?.isConnected ? "success" : "error"}`}
+                        ></span>
+                        <span className="phone-number">
+                          {status?.phoneNumber
+                            ? formatPhone(status.phoneNumber)
+                            : "Nenhum aparelho"}
                         </span>
                       </div>
-                    )}
+                      <span
+                        className={`badge ${status?.isConnected ? "badge-success" : "badge-error"}`}
+                      >
+                        {connectionLabel}
+                      </span>
+                    </div>
                   </div>
                 </div>
 

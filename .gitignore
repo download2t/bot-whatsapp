@@ -4,6 +4,9 @@ ApiBotWhatsapp.Api/obj/
 ApiBotWhatsapp.Api/app.db
 ApiBotWhatsapp.Api/app.db-*
 
+# User-uploaded chat media (images/videos/documents sent or received)
+ApiBotWhatsapp.Api/wwwroot/uploads/
+
 # Desktop controller build outputs
 DesktopController/bin/
 DesktopController/obj/

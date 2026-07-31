@@ -22,6 +22,12 @@ public record WhatsAppConnectionItemResponse(
     string? PhoneNumber,
     string? LastError);
 
-public record WhatsAppCreateConnectionResponse(string Id, string Status);
+public record ResolveWidItem(string PhoneNumber, string? Wid, string? Error = null);
 
-public record SendMessageRequest(string PhoneNumber, string Message, bool MarkAsUnread = false);
+public record SendMessageRequest(
+    string PhoneNumber,
+    string Message,
+    bool MarkAsUnread = false,
+    string? MediaBase64 = null,
+    string? MediaMimeType = null,
+    string? MediaFileName = null);

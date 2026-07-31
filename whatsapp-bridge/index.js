@@ -8,7 +8,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const { Client, LocalAuth } = whatsappWebJs;
+const { Client, LocalAuth, MessageMedia } = whatsappWebJs;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,7 +16,7 @@ const SESSIONS_STATE_FILE = path.join(__dirname, ".sessions.json");
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "40mb" }));
 
 const port = Number(process.env.BRIDGE_PORT ?? 3001);
 const backendWebhookUrl =
@@ -24,7 +24,18 @@ const backendWebhookUrl =
   "http://localhost:5207/api/webhooks/whatsapp";
 const backendWebhookToken =
   process.env.BACKEND_WEBHOOK_TOKEN ?? "CHANGE_THIS_WEBHOOK_TOKEN";
-const backendCompanyCode = process.env.BACKEND_COMPANY_CODE ?? "EMPRESA-TESTE";
+const backendAckWebhookUrl = `${backendWebhookUrl}/ack`;
+const MAX_INCOMING_MEDIA_BYTES = 20 * 1024 * 1024;
+
+// whatsapp-web.js's numeric ack codes (Message.ack / the message_ack event's second argument).
+const ACK_STATUS_BY_CODE = {
+  "-1": "error",
+  0: "pending",
+  1: "sent",
+  2: "delivered",
+  3: "read",
+  4: "played",
+};
 
 let apiAvailable = false;
 let sessionCounter = 1;
@@ -86,6 +97,51 @@ function updateSessionCounterFromId(sessionId) {
 
 function normalizePhone(raw) {
   return String(raw ?? "").replace(/\D/g, "");
+}
+
+// WhatsApp's LID (Linked ID) privacy system hides the real phone number behind an opaque
+// id (e.g. "186762425069751@lid") for contacts that haven't shared their number with this
+// account yet — contact.number comes back empty for those. Resolve the real phone number
+// explicitly via the client's LID<->phone lookup instead of falling back to the LID digits
+// (which would never match anything in Contatos and silently break auto-reply).
+async function resolveMessagePhoneNumber(client, rawPhone, contact) {
+  if (!rawPhone.endsWith("@lid")) {
+    return contact.number || rawPhone.replace(/\D/g, "");
+  }
+
+  console.log(
+    `[LID] Resolvendo ${rawPhone} — contact.number=${contact.number ?? "(vazio)"} contact.id=${JSON.stringify(contact.id)}`,
+  );
+
+  try {
+    const [resolved] = await client.getContactLidAndPhone([rawPhone]);
+    console.log(`[LID] Resultado de getContactLidAndPhone: ${JSON.stringify(resolved)}`);
+    if (resolved?.pn) {
+      return String(resolved.pn).replace(/\D/g, "");
+    }
+  } catch (error) {
+    console.log(`[LID] getContactLidAndPhone falhou: ${error?.message ?? error}`);
+  }
+
+  console.log(`[LID] Não foi possível resolver o número real de ${rawPhone} — usando fallback (pode ficar incorreto).`);
+  return contact.number || rawPhone.replace(/\D/g, "");
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function requestPairingCodeWithRetry(session, phoneNumber, attempts = 4) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await session.client.requestPairingCode(phoneNumber);
+    } catch (error) {
+      lastError = error;
+      await delay(1500 * attempt);
+    }
+  }
+  throw lastError;
 }
 
 function sessionToStatus(session) {
@@ -161,6 +217,14 @@ function ensureSession(id) {
       clientId: sessionId,
       dataPath: path.join(__dirname, ".wwebjs_auth"),
     }),
+    // Pins the WhatsApp Web app bundle to whatever version worked on the first successful
+    // connect, and reuses it from disk on every restart. Without this, every process restart
+    // (e.g. on deploy) can fetch a different live WA Web version, which sometimes makes
+    // WhatsApp treat an already-linked session as needing to be re-verified with a new QR.
+    webVersionCache: {
+      type: "local",
+      path: path.join(__dirname, ".wwebjs_cache"),
+    },
     puppeteer: {
       headless: true,
       args: [
@@ -183,6 +247,11 @@ function ensureSession(id) {
     lastError: null,
     clientReady: false,
     isInitializing: false,
+    // True once client.initialize() has been successfully started and the underlying
+    // Puppeteer browser/page is alive (from first initialize() call until destroy()/disconnect).
+    // Prevents a second initialize() call from stepping on an in-flight QR/pairing-code flow
+    // (e.g. /connect followed shortly by /pairing-code for the same session).
+    clientAlive: false,
     manualDisconnect: false,
     processedMessages: new Set(),
   };
@@ -225,6 +294,7 @@ function ensureSession(id) {
     session.lastError = reason;
     session.clientReady = false;
     session.qrDataUrl = null;
+    session.clientAlive = false;
 
     if (!session.manualDisconnect) {
       setTimeout(() => {
@@ -235,57 +305,156 @@ function ensureSession(id) {
 
   // EVENTO UNIFICADO message_create
   client.on("message_create", async (message) => {
+    let rawPhone = "(unknown)";
     try {
-      if (message.fromMe && message.id.fromMe === false) return;
+      if (message.fromMe && message.id?.fromMe === false) return;
 
       const isOutgoing = message.fromMe;
-      const rawPhone = isOutgoing ? String(message.to) : String(message.from);
+      rawPhone = isOutgoing ? String(message.to) : String(message.from);
+
+      // whatsapp-web.js normally gives every message a stable message.id._serialized, but for
+      // some LID-addressed chats it comes back undefined — in that case Set.has(undefined)
+      // would treat every such message as "the same message", breaking both this session's own
+      // dedup and the API's MessageId-based idempotency guard. Fall back to a content+timestamp
+      // key so dedup still works meaningfully instead of silently collapsing everything.
+      const messageKey =
+        message.id?._serialized ?? `fallback:${rawPhone}:${message.timestamp}:${message.body ?? ""}`;
+
+      console.log(
+        `[MSG] Sessão ${sessionId}: message_create de ${rawPhone} (outgoing=${isOutgoing}, type=${message.type}, id=${message.id?._serialized ?? "(sem _serialized, usando fallback)"}, key=${messageKey})`,
+      );
 
       if (rawPhone.endsWith("@g.us") || rawPhone === "status@broadcast") return;
 
-      if (session.processedMessages.has(message.id._serialized)) return;
-      session.processedMessages.add(message.id._serialized);
+      if (session.processedMessages.has(messageKey)) return;
+      session.processedMessages.add(messageKey);
       setTimeout(
-        () => session.processedMessages.delete(message.id._serialized),
+        () => session.processedMessages.delete(messageKey),
         60000,
       );
 
       const contact = await client.getContactById(rawPhone);
-      const phoneNumber = contact.number || rawPhone.replace(/\D/g, "");
-      if (!phoneNumber) return;
+      const phoneNumber = await resolveMessagePhoneNumber(client, rawPhone, contact);
+      if (!phoneNumber) {
+        console.log(`[MSG] Sessão ${sessionId}: descartada — não foi possível determinar um número/id para ${rawPhone}.`);
+        return;
+      }
 
       const contactName = contact.name || contact.pushname || null;
       const directionStr = isOutgoing ? "Outgoing" : "Incoming";
-      const response = await axios.post(
-        backendWebhookUrl,
-        {
-          PhoneNumber: phoneNumber,
-          ContactName: contactName,
-          Message: message.body ?? "",
-          CompanyCode: backendCompanyCode,
-          WhatsAppNumber: session.phoneNumber,
-          MessageTimestampUtc: message.timestamp
-            ? new Date(Number(message.timestamp) * 1000).toISOString()
-            : new Date().toISOString(),
-          Direction: directionStr,
-        },
+
+      // Download the actual image/video/document so it can be shown again in the chat
+      // history later, instead of just logging the text caption. Skipped for outgoing
+      // messages (we already have those bytes on the API side, from the send request).
+      let mediaBase64 = null;
+      let mediaMimeType = null;
+      let mediaFileName = null;
+      if (!isOutgoing && message.hasMedia) {
+        try {
+          const media = await message.downloadMedia();
+          if (media?.data) {
+            const approxBytes = Math.floor((media.data.length * 3) / 4);
+            if (approxBytes <= MAX_INCOMING_MEDIA_BYTES) {
+              mediaBase64 = media.data;
+              mediaMimeType = media.mimetype || null;
+              mediaFileName = media.filename || null;
+            } else {
+              console.log(`[MSG] Sessão ${sessionId}: mídia recebida de ${rawPhone} excede o limite (${approxBytes} bytes), registrando só o texto.`);
+            }
+          }
+        } catch (error) {
+          console.log(`[MSG] Sessão ${sessionId}: falha ao baixar mídia recebida de ${rawPhone}: ${error?.message ?? error}`);
+        }
+      }
+
+      const payload = {
+        PhoneNumber: phoneNumber,
+        ContactName: contactName,
+        Message: message.body ?? "",
+        WhatsAppNumber: session.phoneNumber,
+        MessageTimestampUtc: message.timestamp
+          ? new Date(Number(message.timestamp) * 1000).toISOString()
+          : new Date().toISOString(),
+        Direction: directionStr,
+        MessageId: messageKey,
+        OwnerUserId: extractOwnerUserId(session.id),
+        RawSenderId: rawPhone,
+        MediaBase64: mediaBase64,
+        MediaMimeType: mediaMimeType,
+        MediaFileName: mediaFileName,
+      };
+
+      console.log(
+        `[WEBHOOK] Sessão ${sessionId}: enviando para ${backendWebhookUrl} — PhoneNumber=${phoneNumber} OwnerUserId=${payload.OwnerUserId} RawSenderId=${rawPhone}`,
+      );
+
+      let response;
+      try {
+        response = await axios.post(backendWebhookUrl, payload, {
+          validateStatus: () => true,
+          timeout: 10000,
+          headers: {
+            "Content-Type": "application/json",
+            "X-Webhook-Token": backendWebhookToken,
+          },
+        });
+      } catch (httpError) {
+        session.lastError = `Webhook unreachable: ${httpError?.message ?? httpError}`;
+        console.log(
+          `[WEBHOOK] Sessão ${sessionId}: FALHA ao chamar ${backendWebhookUrl} — ${httpError?.message ?? httpError}. A API está rodando? BACKEND_WEBHOOK_URL está certo no .env do bridge?`,
+        );
+        return;
+      }
+
+      if (response.status >= 400) {
+        session.lastError = `Webhook returned ${response.status}`;
+        console.log(
+          `[WEBHOOK] Sessão ${sessionId}: API respondeu ${response.status} — ${JSON.stringify(response.data)}`,
+        );
+      } else {
+        session.lastError = null;
+        console.log(
+          `[WEBHOOK] Sessão ${sessionId}: API respondeu ${response.status} — ${JSON.stringify(response.data)}`,
+        );
+      }
+    } catch (error) {
+      session.lastError = error?.message ?? "Webhook forward failed";
+      console.log(
+        `[ERRO INTERNO] Sessão ${sessionId}, rawPhone=${rawPhone}: ${error?.stack ?? error?.message ?? error}`,
+      );
+    }
+  });
+
+  // WhatsApp reports delivery-status changes (sent -> delivered -> read) for our own outgoing
+  // messages through this event. Forward it so the chat UI can show checkmarks like real
+  // WhatsApp Web instead of just "Sent" forever.
+  client.on("message_ack", async (message, ack) => {
+    try {
+      if (!message.fromMe) return;
+
+      const ackStatus = ACK_STATUS_BY_CODE[String(ack)];
+      if (!ackStatus) return;
+
+      const messageId = message.id?._serialized;
+      const ownerUserId = extractOwnerUserId(session.id);
+      if (!messageId || ownerUserId === null) return;
+
+      console.log(`[ACK] Sessão ${sessionId}: ${messageId} -> ${ackStatus} (code=${ack})`);
+
+      await axios.post(
+        backendAckWebhookUrl,
+        { MessageId: messageId, OwnerUserId: ownerUserId, AckStatus: ackStatus },
         {
           validateStatus: () => true,
+          timeout: 10000,
           headers: {
             "Content-Type": "application/json",
             "X-Webhook-Token": backendWebhookToken,
           },
         },
       );
-
-      if (response.status >= 400) {
-        session.lastError = `Webhook returned ${response.status}`;
-      } else {
-        session.lastError = null;
-      }
     } catch (error) {
-      session.lastError = error?.message ?? "Webhook forward failed";
-      console.log(`[ERRO INTERNO] ${error?.message}`);
+      console.log(`[ACK] Sessão ${sessionId}: falha ao repassar ack — ${error?.message ?? error}`);
     }
   });
 
@@ -345,7 +514,7 @@ async function logoutDefinitiveById(id) {
 }
 
 async function initializeSessionIfNeeded(session) {
-  if (session.clientReady || session.isInitializing) {
+  if (session.clientReady || session.isInitializing || session.clientAlive) {
     return;
   }
 
@@ -353,6 +522,7 @@ async function initializeSessionIfNeeded(session) {
     session.isInitializing = true;
     session.status = "connecting";
     await session.client.initialize();
+    session.clientAlive = true;
   } catch (error) {
     session.lastError =
       error?.message ?? "Unable to initialize WhatsApp client";
@@ -379,29 +549,26 @@ async function disconnectSession(session, { logout = false } = {}) {
   session.clientReady = false;
   session.qrDataUrl = null;
   session.phoneNumber = null;
+  session.clientAlive = false;
 }
 
-function pickSenderSession(sourceWhatsAppNumber) {
-  const normalizedSource = normalizePhone(sourceWhatsAppNumber);
-  const allSessions = Array.from(sessions.values());
-
-  if (normalizedSource) {
-    const matching = allSessions.find(
-      (item) =>
-        item.clientReady &&
-        normalizePhone(item.phoneNumber) === normalizedSource,
-    );
-    if (matching) {
-      return matching;
-    }
+// Every session belongs to exactly one app user (id "user-{userId}"). No fallback to "any
+// connected session" - that would let one user's message go out through another user's
+// WhatsApp number, which is exactly the isolation this is supposed to guarantee.
+function pickSenderSession(sessionId) {
+  if (!sessionId) {
+    return null;
   }
 
-  const defaultConnected = sessions.get("default");
-  if (defaultConnected?.clientReady) {
-    return defaultConnected;
-  }
+  const session = sessions.get(normalizeSessionId(sessionId));
+  return session && session.clientReady ? session : null;
+}
 
-  return allSessions.find((item) => item.clientReady) ?? null;
+// Extracts the owning app user id from a "user-{id}" session id. Returns null for anything
+// that doesn't follow that scheme (e.g. legacy sessions), so the API knows not to guess.
+function extractOwnerUserId(sessionId) {
+  const match = /^user-(\d+)$/.exec(String(sessionId ?? ""));
+  return match ? Number(match[1]) : null;
 }
 
 app.get("/health", (_req, res) => {
@@ -536,6 +703,36 @@ app.post("/session/restart-all", async (_req, res) => {
   });
 });
 
+// Reverse lookup: for each given phone number, ask WhatsApp what id (WID) it currently uses
+// for that contact. Used by the API to match an incoming LID-addressed sender against the
+// registered Contatos, since decoding a LID back into a phone number directly is unreliable
+// and privacy-restricted, but "what id does WhatsApp use for phone X" is not.
+app.post("/session/:id/resolve-wid", async (req, res) => {
+  const session = getSessionOrDefault(req.params.id);
+  if (!session || !session.clientReady) {
+    return res.status(409).json({ error: "Session not connected" });
+  }
+
+  const phoneNumbers = Array.isArray(req.body?.phoneNumbers)
+    ? req.body.phoneNumbers
+    : [];
+
+  const results = [];
+  for (const phoneNumber of phoneNumbers) {
+    const normalized = normalizePhone(phoneNumber);
+    if (!normalized) continue;
+
+    try {
+      const wid = await session.client.getNumberId(normalized);
+      results.push({ phoneNumber, wid: wid?._serialized ?? null });
+    } catch (error) {
+      results.push({ phoneNumber, wid: null, error: error?.message ?? String(error) });
+    }
+  }
+
+  return res.json(results);
+});
+
 app.post("/session/:id/logout-definitivo", async (req, res) => {
   const sessionId = normalizeSessionId(req.params.id);
 
@@ -579,7 +776,12 @@ app.post("/session/:id/pairing-code", async (req, res) => {
         });
     }
 
-    const pairingCode = await session.client.requestPairingCode(phoneNumber);
+    // Right after initialize() resolves, WhatsApp Web's own linking page can still be a
+    // moment away from finishing wiring up its internal callbacks. Calling
+    // requestPairingCode too early throws "window.onCodeReceivedEvent is not a function".
+    // Give it a beat, then retry with backoff instead of failing on the first race.
+    await delay(1200);
+    const pairingCode = await requestPairingCodeWithRetry(session, phoneNumber);
     return res.json({ pairingCode });
   } catch (error) {
     session.lastError = error?.message ?? "Unable to generate pairing code";
@@ -636,27 +838,66 @@ app.post("/session/pairing-code", async (req, res) => {
 
 app.post("/messages/send", async (req, res) => {
   try {
-    const { phoneNumber, message, markAsUnread, sourceWhatsAppNumber } =
-      req.body ?? {};
-    if (!phoneNumber || !message) {
+    const {
+      phoneNumber,
+      message,
+      markAsUnread,
+      sessionId,
+      mediaBase64,
+      mediaMimeType,
+      mediaFileName,
+    } = req.body ?? {};
+    if (!phoneNumber || (!message && !mediaBase64)) {
       return res
         .status(400)
-        .json({ error: "phoneNumber and message are required" });
+        .json({ error: "phoneNumber and (message or mediaBase64) are required" });
     }
 
-    const senderSession = pickSenderSession(sourceWhatsAppNumber);
+    const senderSession = pickSenderSession(sessionId);
     if (!senderSession) {
       return res
         .status(409)
-        .json({ error: "No connected WhatsApp session available" });
+        .json({ error: "Your WhatsApp session is not connected" });
     }
 
     const normalizedPhone = normalizePhone(phoneNumber);
-    const target = `${normalizedPhone}@c.us`;
-    const result = await senderSession.client.sendMessage(
-      target,
-      String(message),
-    );
+    let target = `${normalizedPhone}@c.us`;
+
+    // WhatsApp now tracks many contacts internally via LID instead of phone-based JID even
+    // for outgoing sends. Sending straight to "{phone}@c.us" for one of those contacts fails
+    // deep inside WhatsApp Web's own code ("No LID for user"). getNumberId() alone isn't
+    // reliable here either (throws "Cannot read properties of undefined (reading 'id')" for
+    // some LID contacts) — getContactById() is the same call that already correctly resolves
+    // LID contacts on the receive side (see resolveMessagePhoneNumber's [LID] logs, where
+    // contact.id came back as the proper "...@c.us"/"...@lid" id), so reuse it here too.
+    try {
+      const contact = await senderSession.client.getContactById(target);
+      if (contact?.id?._serialized) {
+        target = contact.id._serialized;
+      } else {
+        console.log(`[SEND] Sessão ${sessionId}: getContactById não retornou id resolvido para ${normalizedPhone}, usando fallback ${target}.`);
+      }
+    } catch (error) {
+      console.log(`[SEND] Sessão ${sessionId}: falha ao resolver contato de ${normalizedPhone} (${error?.message ?? error}), usando fallback ${target}.`);
+    }
+
+    console.log(`[SEND] Sessão ${sessionId}: enviando para target=${target} (phoneNumber=${normalizedPhone}).`);
+
+    let result;
+    if (mediaBase64) {
+      const media = new MessageMedia(
+        mediaMimeType || "application/octet-stream",
+        mediaBase64,
+        mediaFileName || "arquivo",
+      );
+      result = await senderSession.client.sendMessage(
+        target,
+        media,
+        message ? { caption: String(message) } : undefined,
+      );
+    } else {
+      result = await senderSession.client.sendMessage(target, String(message));
+    }
 
     // 👇 SOLUÇÃO DA DUPLICAÇÃO DE MENSAGENS ENVIADAS PELO SISTEMA
     // Injeta o ID da mensagem no cache para que o evento 'message_create' ignore ela
@@ -691,6 +932,7 @@ app.post("/messages/send", async (req, res) => {
       unreadApplied,
     });
   } catch (error) {
+    console.log(`[SEND] Falha ao enviar mensagem: ${error?.stack ?? error?.message ?? error}`);
     return res.status(500).json({ error: error?.message ?? "Send failed" });
   }
 });
@@ -710,6 +952,14 @@ async function restorePersistedSessions() {
 
   console.log(`Restoring ${restoredIds.length} persisted session(s)...`);
   for (const id of restoredIds) {
+    const authDirExists = await fs
+      .access(getAuthSessionDir(normalizeSessionId(id)))
+      .then(() => true)
+      .catch(() => false);
+    console.log(
+      `[RESTORE] Sessão ${id}: auth local ${authDirExists ? "encontrada" : "NÃO encontrada"} em ${getAuthSessionDir(normalizeSessionId(id))}${authDirExists ? "" : " — provavelmente vai pedir novo QR."}`,
+    );
+
     const session = ensureSession(id);
     await initializeSessionIfNeeded(session).catch((error) => {
       session.lastError = error?.message ?? "Unable to restore session";
