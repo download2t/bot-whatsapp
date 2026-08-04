@@ -22,29 +22,40 @@ fail() { echo -e "\033[1;31mERRO: $1\033[0m" >&2; exit 1; }
 
 cd "$APP_DIR"
 
-log "1/7 - Atualizando código"
+log "1/8 - Atualizando código"
 git stash
 git pull
 
-log "2/7 - Parando serviços"
+log "2/8 - Parando serviços"
 systemctl stop mydev_api mydev_bridge || true
 
-log "3/7 - Atualizando banco (EF Core)"
+log "3/8 - Backup do banco"
+mkdir -p "$(dirname "$DB_PATH")"
+if [ -f "$DB_PATH" ]; then
+  cp "$DB_PATH" "$DB_PATH.backup-$(date +%Y%m%d-%H%M%S)"
+else
+  echo "Aviso: $DB_PATH ainda não existe — pulando backup."
+fi
+
+log "4/8 - Restaurando dependências da API"
+cd "$API_DIR"
+dotnet restore
+
+log "5/8 - Atualizando banco (EF Core)"
 export PATH="$PATH:/root/.dotnet/tools"
 if ! command -v dotnet-ef &>/dev/null; then
   dotnet tool install --global dotnet-ef --version 10.0.3
 fi
 
-cd "$API_DIR"
 ASPNETCORE_ENVIRONMENT=Production \
 Jwt__SigningKey="$JWT_SIGNING_KEY" \
 ConnectionStrings__DefaultConnection="Data Source=$DB_PATH" \
 dotnet ef database update
 
-log "4/7 - Publicando API"
+log "6/8 - Publicando API"
 dotnet publish -c Release -o "$PUBLISH_DIR"
 
-log "5/7 - Build do frontend"
+log "7/8 - Build do frontend"
 cd "$FRONTEND_DIR"
 npm install
 npm run build
@@ -52,11 +63,9 @@ rm -rf "${WEB_ROOT:?}"/*
 cp -r dist/* "$WEB_ROOT"/
 chown -R www-data:www-data "$WEB_ROOT"
 
-log "6/7 - Atualizando bridge"
+log "8/8 - Atualizando bridge e reiniciando serviços"
 cd "$BRIDGE_DIR"
 npm install
-
-log "7/7 - Reiniciando serviços"
 systemctl start mydev_api mydev_bridge
 systemctl restart nginx
 
