@@ -66,6 +66,15 @@ else
   echo "Aviso: $DB_PATH ainda não existe (primeira subida) — pulando backup."
 fi
 
+log "Conferindo dotnet-ef"
+export PATH="$PATH:$HOME/.dotnet/tools"
+if dotnet tool list --global | grep -q dotnet-ef; then
+  dotnet tool update --global dotnet-ef --version "$EF_TOOL_VERSION" || true
+else
+  dotnet tool install --global dotnet-ef --version "$EF_TOOL_VERSION"
+fi
+command -v dotnet-ef > /dev/null || fail "dotnet-ef ainda não encontrado no PATH depois de instalar — confira \$HOME/.dotnet/tools."
+
 log "4/8 - Atualizando o banco (EF Core migrations)"
 cd "$API_DIR"
 ASPNETCORE_ENVIRONMENT=Production \
