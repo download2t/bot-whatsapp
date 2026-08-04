@@ -194,9 +194,20 @@ public class AutoReplyService(
                 return new WhatsAppWebhookResponse(false, "No active schedule rule for current time.", null);
             }
 
+            // Resolve which registered país the sender belongs to, by DDI prefix of the real
+            // WhatsApp-sourced number (normalizedPhone always carries the real country code —
+            // unlike Contato.PhoneNumber, which may have been typed without one). Longest DDI
+            // first avoids a shorter registered code false-matching when a longer one also fits.
+            var ownerPaises = await dbContext.Paises
+                .Where(p => p.OwnerUserId == ownerUserId && p.IsActive)
+                .OrderByDescending(p => p.Ddi.Length)
+                .ToListAsync(cancellationToken);
+            var matchedPais = ownerPaises.FirstOrDefault(p => normalizedPhone.StartsWith(p.Ddi));
+
             var currentDayOfWeek = (int)currentTime.DayOfWeek;
-            var messageForToday = GetRuleMessages(rule)
-                .FirstOrDefault(item => item.Days.Contains(currentDayOfWeek));
+            var todaysMessages = GetRuleMessages(rule).Where(item => item.Days.Contains(currentDayOfWeek));
+            var messageForToday = todaysMessages.FirstOrDefault(item => item.PaisId == matchedPais?.Id)
+                ?? todaysMessages.FirstOrDefault(item => item.PaisId is null);
             if (messageForToday is null)
             {
                 return new WhatsAppWebhookResponse(false, "No message configured for the current day of week. Auto reply skipped.", null);

@@ -165,11 +165,33 @@ export function Navigation({
             <button
               className="nav-trigger"
               onClick={() => {
+                navigate("/paises");
+                closeMenus();
+              }}
+            >
+              Países
+            </button>
+          </li>
+          <li className="nav-item">
+            <button
+              className="nav-trigger"
+              onClick={() => {
                 navigate("/documentacao");
                 closeMenus();
               }}
             >
               Documentar Conversa
+            </button>
+          </li>
+          <li className="nav-item">
+            <button
+              className="nav-trigger"
+              onClick={() => {
+                navigate("/messages/bulk/historico");
+                closeMenus();
+              }}
+            >
+              Histórico de Envios
             </button>
           </li>
           {isAdmin && (

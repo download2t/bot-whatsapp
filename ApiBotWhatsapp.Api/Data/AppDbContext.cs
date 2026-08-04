@@ -10,6 +10,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<MessageLog> MessageLogs => Set<MessageLog>();
     public DbSet<Turma> Turmas => Set<Turma>();
     public DbSet<Contato> Contatos => Set<Contato>();
+    public DbSet<BulkCampaign> BulkCampaigns => Set<BulkCampaign>();
+    public DbSet<BulkCampaignItem> BulkCampaignItems => Set<BulkCampaignItem>();
+    public DbSet<Pais> Paises => Set<Pais>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -43,6 +46,22 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .HasConversion(
                 value => value.ToString(@"hh\:mm"),
                 value => TimeSpan.Parse(value));
+
+        modelBuilder.Entity<BulkCampaign>()
+            .HasIndex(c => new { c.OwnerUserId, c.CreatedAtUtc });
+
+        modelBuilder.Entity<BulkCampaignItem>()
+            .HasIndex(i => i.BulkCampaignId);
+
+        modelBuilder.Entity<BulkCampaignItem>()
+            .HasOne(i => i.BulkCampaign)
+            .WithMany(c => c.Items)
+            .HasForeignKey(i => i.BulkCampaignId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<Pais>()
+            .HasIndex(p => new { p.OwnerUserId, p.Ddi })
+            .IsUnique();
 
         base.OnModelCreating(modelBuilder);
     }

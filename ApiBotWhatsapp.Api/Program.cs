@@ -32,6 +32,7 @@ builder.Services.AddScoped<AutoReplyService>();
 builder.Services.AddScoped<WhatsAppMessageSender>();
 builder.Services.AddScoped<WhatsAppBridgeClient>();
 builder.Services.AddScoped<MediaStorageService>();
+builder.Services.AddSingleton<BulkCampaignRunner>();
 
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var signingKey = jwtSection["SigningKey"]
@@ -78,6 +79,25 @@ using (var scope = app.Services.CreateScope())
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     await dbContext.Database.MigrateAsync();
     await SeedData.InitializeAsync(dbContext);
+
+    // Any campaign still "Running" here means the process died mid-send (crash/restart/deploy):
+    // there's no in-memory CancellationTokenSource for it anymore, so it can never be resumed or
+    // cancelled through BulkCampaignRunner. Mark it Interrupted instead of leaving it stuck as
+    // "Running" forever — its still-Pending items remain visible and can be retried.
+    var interruptedCampaigns = await dbContext.BulkCampaigns
+        .Where(c => c.Status == "Running")
+        .ToListAsync();
+
+    foreach (var campaign in interruptedCampaigns)
+    {
+        campaign.Status = "Interrupted";
+        campaign.FinishedAtUtc = DateTime.UtcNow;
+    }
+
+    if (interruptedCampaigns.Count > 0)
+    {
+        await dbContext.SaveChangesAsync();
+    }
 }
 
 if (app.Environment.IsDevelopment())

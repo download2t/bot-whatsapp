@@ -13,22 +13,42 @@ public record BulkSendRequest(
 	string Message,
 	bool MarkAsUnread = false,
 	int IntervalSeconds = 60,
-	bool StreamUpdates = false,
 	string? MediaBase64 = null,
 	string? MediaMimeType = null,
 	string? MediaFileName = null);
-public record BulkSendResult(int ContactId, string PhoneNumber, bool Success, string Status);
 
-public record BulkSendStreamEvent(
-	string Type,
-	int? ContactId,
-	string? PhoneNumber,
-	bool? Success,
-	string? Status,
+public record BulkCampaignItemResponse(
+	int Id,
+	int ContactId,
+	string ContactName,
+	string PhoneNumber,
+	string Status,
+	string? StatusDetail,
+	DateTime? ProcessedAtUtc);
+
+public record BulkCampaignResponse(
+	int Id,
+	string Greeting,
+	string MessageTemplate,
+	int IntervalSeconds,
+	string? MediaUrl,
+	string? MediaMimeType,
+	string? MediaFileName,
+	string Status,
+	string? AbortReason,
+	int TotalCount,
 	int SentCount,
 	int FailedCount,
-	int RemainingCount,
+	DateTime CreatedAtUtc,
+	DateTime? FinishedAtUtc,
+	List<BulkCampaignItemResponse> Items);
+
+public record BulkCampaignListItemResponse(
+	int Id,
+	string MessageTemplate,
+	string Status,
 	int TotalCount,
-	bool Completed = false,
-	bool Aborted = false,
-	string? AbortReason = null);
+	int SentCount,
+	int FailedCount,
+	DateTime CreatedAtUtc,
+	DateTime? FinishedAtUtc);

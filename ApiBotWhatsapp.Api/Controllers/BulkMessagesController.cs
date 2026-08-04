@@ -5,45 +5,52 @@ using ApiBotWhatsapp.Api.Services;
 using ApiBotWhatsapp.Api.Utils;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 
 namespace ApiBotWhatsapp.Api.Controllers;
 
 [ApiController]
 [Route("api/messages/bulk")]
-public class BulkMessagesController(AppDbContext dbContext, WhatsAppMessageSender sender, WhatsAppBridgeClient bridgeClient, MediaStorageService mediaStorage) : ControllerBase
+public class BulkMessagesController(
+    AppDbContext dbContext,
+    WhatsAppMessageSender sender,
+    WhatsAppBridgeClient bridgeClient,
+    MediaStorageService mediaStorage,
+    BulkCampaignRunner campaignRunner) : ControllerBase
 {
     // ~20MB binary encoded as base64 (base64 is ~4/3 the size of the raw bytes).
     private const int MaxMediaBase64Length = 27_000_000;
 
-    private static bool ShouldAbortBulk(string status)
-    {
-        if (string.IsNullOrWhiteSpace(status))
-        {
-            return false;
-        }
+    private static BulkCampaignItemResponse ToItemResponse(BulkCampaignItem item) => new(
+        item.Id,
+        item.ContactId,
+        item.ContactName,
+        item.PhoneNumber,
+        item.Status,
+        item.StatusDetail,
+        item.ProcessedAtUtc);
 
-        var normalized = status.ToLowerInvariant();
-        return normalized.Contains("block")
-            || normalized.Contains("bloque")
-            || normalized.Contains("ban")
-            || normalized.Contains("forbidden")
-            || normalized.Contains("unauthorized")
-            || normalized.Contains("not connected")
-            || normalized.Contains("disconnected")
-            || normalized.Contains("session")
-            || normalized.Contains("rate limit")
-            || normalized.Contains("429")
-            || normalized.Contains("403")
-            || normalized.Contains("401");
-    }
+    private static BulkCampaignResponse ToResponse(BulkCampaign campaign) => new(
+        campaign.Id,
+        campaign.Greeting,
+        campaign.MessageTemplate,
+        campaign.IntervalSeconds,
+        campaign.MediaUrl,
+        campaign.MediaMimeType,
+        campaign.MediaFileName,
+        campaign.Status,
+        campaign.AbortReason,
+        campaign.TotalCount,
+        campaign.SentCount,
+        campaign.FailedCount,
+        campaign.CreatedAtUtc,
+        campaign.FinishedAtUtc,
+        campaign.Items.OrderBy(i => i.Id).Select(ToItemResponse).ToList());
 
     [HttpPost]
     [RequestSizeLimit(40_000_000)]
-    public async Task<ActionResult<IEnumerable<BulkSendResult>>> Send([FromBody] BulkSendRequest req, CancellationToken cancellationToken)
+    public async Task<ActionResult<BulkCampaignResponse>> Send([FromBody] BulkSendRequest req, CancellationToken cancellationToken)
     {
         var ownerUserId = this.GetCurrentUserId();
-        var senderSessionId = $"user-{ownerUserId}";
 
         if (!string.IsNullOrEmpty(req.MediaBase64) && req.MediaBase64.Length > MaxMediaBase64Length)
         {
@@ -55,12 +62,10 @@ public class BulkMessagesController(AppDbContext dbContext, WhatsAppMessageSende
 
         if (req.ContactIds is not null && req.ContactIds.Count > 0)
         {
-            // If ContactIds are explicitly provided, use only those
             contactsQuery = contactsQuery.Where(c => req.ContactIds.Contains(c.Id));
         }
         else if (req.TurmaId > 0)
         {
-            // Otherwise, use all contacts from the turma
             contactsQuery = contactsQuery.Where(c => c.TurmaId == req.TurmaId);
         }
         else
@@ -73,149 +78,116 @@ public class BulkMessagesController(AppDbContext dbContext, WhatsAppMessageSende
         if (!contacts.Any()) return BadRequest($"No contacts found for turma/selection. (TurmaId: {req.TurmaId}, ContactIds: {req.ContactIds?.Count ?? 0})");
 
         var greeting = string.IsNullOrWhiteSpace(req.Greeting) ? "Bom dia" : req.Greeting.Trim();
-        var body = req.Message ?? string.Empty;
         var intervalSeconds = req.IntervalSeconds <= 0 ? 60 : req.IntervalSeconds;
 
-        async Task<(List<BulkSendResult> Results, int SentCount, int FailedCount, bool Aborted, string? AbortReason)> ExecuteBulkAsync(Func<BulkSendStreamEvent, Task>? emitEvent)
+        string? mediaUrl = null;
+        if (!string.IsNullOrEmpty(req.MediaBase64))
         {
-            var results = new List<BulkSendResult>();
-            var sentCount = 0;
-            var failedCount = 0;
-            var aborted = false;
-            string? abortReason = null;
-
-            for (var index = 0; index < contacts.Count; index++)
-            {
-                var contact = contacts[index];
-
-                if (emitEvent is not null)
-                {
-                    await emitEvent(new BulkSendStreamEvent(
-                        Type: "sending",
-                        ContactId: contact.Id,
-                        PhoneNumber: contact.PhoneNumber,
-                        Success: null,
-                        Status: $"Enviando para {contact.Name}",
-                        SentCount: sentCount,
-                        FailedCount: failedCount,
-                        RemainingCount: contacts.Count - index,
-                        TotalCount: contacts.Count));
-                }
-
-                var personalized = $"{greeting} {contact.Name}!\n{body}";
-                var normalizedPhone = PhoneNumberUtils.Normalize(contact.PhoneNumber);
-                var (success, status, _) = await sender.SendMessageAsync(
-                    normalizedPhone,
-                    personalized,
-                    req.MarkAsUnread,
-                    senderSessionId,
-                    cancellationToken,
-                    req.MediaBase64,
-                    req.MediaMimeType,
-                    req.MediaFileName);
-
-                if (success)
-                {
-                    sentCount++;
-                }
-                else
-                {
-                    failedCount++;
-                }
-
-                results.Add(new BulkSendResult(contact.Id, contact.PhoneNumber, success, status));
-
-                if (emitEvent is not null)
-                {
-                    await emitEvent(new BulkSendStreamEvent(
-                        Type: "result",
-                        ContactId: contact.Id,
-                        PhoneNumber: contact.PhoneNumber,
-                        Success: success,
-                        Status: status,
-                        SentCount: sentCount,
-                        FailedCount: failedCount,
-                        RemainingCount: contacts.Count - index - 1,
-                        TotalCount: contacts.Count));
-                }
-
-                if (!success && ShouldAbortBulk(status))
-                {
-                    aborted = true;
-                    abortReason = status;
-
-                    if (emitEvent is not null)
-                    {
-                        await emitEvent(new BulkSendStreamEvent(
-                            Type: "aborted",
-                            ContactId: contact.Id,
-                            PhoneNumber: contact.PhoneNumber,
-                            Success: false,
-                            Status: status,
-                            SentCount: sentCount,
-                            FailedCount: failedCount,
-                            RemainingCount: contacts.Count - index - 1,
-                            TotalCount: contacts.Count,
-                            Completed: true,
-                            Aborted: true,
-                            AbortReason: status));
-                    }
-
-                    break;
-                }
-
-                if (index < contacts.Count - 1)
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(intervalSeconds), cancellationToken);
-                }
-            }
-
-            return (results, sentCount, failedCount, aborted, abortReason);
+            mediaUrl = mediaStorage.SaveBase64(ownerUserId, req.MediaBase64, req.MediaMimeType, req.MediaFileName);
         }
 
-        if (!req.StreamUpdates)
+        var campaign = new BulkCampaign
         {
-            var (results, _, _, _, _) = await ExecuteBulkAsync(null);
-            return Ok(results);
-        }
-
-        Response.StatusCode = StatusCodes.Status200OK;
-        Response.ContentType = "application/x-ndjson";
-        Response.Headers.CacheControl = "no-cache";
-        Response.Headers["X-Accel-Buffering"] = "no";
-
-        await Response.StartAsync(cancellationToken);
-        var jsonOptions = new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+            OwnerUserId = ownerUserId,
+            TurmaId = req.TurmaId > 0 ? req.TurmaId : null,
+            Greeting = greeting,
+            MessageTemplate = req.Message ?? string.Empty,
+            IntervalSeconds = intervalSeconds,
+            MarkAsUnread = req.MarkAsUnread,
+            MediaUrl = mediaUrl,
+            MediaMimeType = !string.IsNullOrEmpty(req.MediaBase64) ? req.MediaMimeType : null,
+            MediaFileName = !string.IsNullOrEmpty(req.MediaBase64) ? req.MediaFileName : null,
+            Status = "Running",
+            TotalCount = contacts.Count,
         };
 
-        async Task WriteEventAsync(BulkSendStreamEvent bulkEvent)
+        campaign.Items = contacts.Select(contact => new BulkCampaignItem
         {
-            await JsonSerializer.SerializeAsync(Response.Body, bulkEvent, jsonOptions, cancellationToken);
-            await Response.WriteAsync("\n", cancellationToken);
-            await Response.Body.FlushAsync(cancellationToken);
+            ContactId = contact.Id,
+            ContactName = contact.Name,
+            PhoneNumber = contact.PhoneNumber,
+            Status = "Pending",
+        }).ToList();
+
+        dbContext.BulkCampaigns.Add(campaign);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        campaignRunner.Start(campaign.Id, req.MediaBase64);
+
+        return StatusCode(StatusCodes.Status202Accepted, ToResponse(campaign));
+    }
+
+    [HttpGet]
+    public async Task<ActionResult<IEnumerable<BulkCampaignListItemResponse>>> List(CancellationToken cancellationToken)
+    {
+        var ownerUserId = this.GetCurrentUserId();
+
+        var items = await dbContext.BulkCampaigns
+            .Where(c => c.OwnerUserId == ownerUserId)
+            .OrderByDescending(c => c.CreatedAtUtc)
+            .Select(c => new BulkCampaignListItemResponse(
+                c.Id,
+                c.MessageTemplate,
+                c.Status,
+                c.TotalCount,
+                c.SentCount,
+                c.FailedCount,
+                c.CreatedAtUtc,
+                c.FinishedAtUtc))
+            .ToListAsync(cancellationToken);
+
+        return Ok(items);
+    }
+
+    [HttpGet("{id:int}")]
+    public async Task<ActionResult<BulkCampaignResponse>> GetById(int id, CancellationToken cancellationToken)
+    {
+        var ownerUserId = this.GetCurrentUserId();
+
+        var campaign = await dbContext.BulkCampaigns
+            .Include(c => c.Items)
+            .FirstOrDefaultAsync(c => c.Id == id && c.OwnerUserId == ownerUserId, cancellationToken);
+
+        if (campaign is null) return NotFound();
+
+        return Ok(ToResponse(campaign));
+    }
+
+    [HttpPost("{id:int}/cancel")]
+    public async Task<ActionResult<BulkCampaignResponse>> Cancel(int id, CancellationToken cancellationToken)
+    {
+        var ownerUserId = this.GetCurrentUserId();
+
+        var campaign = await dbContext.BulkCampaigns
+            .Include(c => c.Items)
+            .FirstOrDefaultAsync(c => c.Id == id && c.OwnerUserId == ownerUserId, cancellationToken);
+
+        if (campaign is null) return NotFound();
+
+        if (campaign.Status != "Running")
+        {
+            return Ok(ToResponse(campaign));
         }
 
-        var (_, sentCount, failedCount, aborted, abortReason) = await ExecuteBulkAsync(WriteEventAsync);
+        var cancelledInMemory = campaignRunner.TryCancel(id);
 
-        if (!aborted)
+        if (!cancelledInMemory)
         {
-            await WriteEventAsync(new BulkSendStreamEvent(
-                Type: "completed",
-                ContactId: null,
-                PhoneNumber: null,
-                Success: null,
-                Status: "Bulk send completed.",
-                SentCount: sentCount,
-                FailedCount: failedCount,
-                RemainingCount: 0,
-                TotalCount: contacts.Count,
-                Completed: true,
-                Aborted: false));
+            // No in-memory job found (e.g. the API restarted since this campaign started) —
+            // finalize it here directly so the cancel button always works.
+            foreach (var item in campaign.Items.Where(i => i.Status == "Pending" || i.Status == "Sending"))
+            {
+                item.Status = "Cancelled";
+                item.StatusDetail = "Cancelado pelo usuário.";
+                item.ProcessedAtUtc = DateTime.UtcNow;
+            }
+
+            campaign.Status = "Cancelled";
+            campaign.FinishedAtUtc = DateTime.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        return new EmptyResult();
+        return Ok(ToResponse(campaign));
     }
 
     [HttpPost("send")]

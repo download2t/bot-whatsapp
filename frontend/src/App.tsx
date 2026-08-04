@@ -11,7 +11,11 @@ import { TurmaForm } from './pages/TurmaForm'
 import { ContatosList } from './pages/ContatosList'
 import { ContatoForm } from './pages/ContatoForm'
 import { ContatosImportExcel } from './pages/ContatosImportExcel'
+import { PaisesList } from './pages/PaisesList'
+import { PaisForm } from './pages/PaisForm'
 import { BulkMessages } from './pages/BulkMessages'
+import { BulkCampaignDetail } from './pages/BulkCampaignDetail'
+import { BulkCampaignHistory } from './pages/BulkCampaignHistory'
 import { ProfilePage } from './pages/ProfilePage'
 import { ScheduleRulesList } from './pages/ScheduleRulesList'
 import { ScheduleRuleForm } from './pages/ScheduleRuleForm'
@@ -82,6 +86,8 @@ export default function App() {
         <Route path="/messages" element={<Messages />} />
         <Route path="/documentacao" element={<Documentacao />} />
         <Route path="/messages/bulk" element={<BulkMessages />} />
+        <Route path="/messages/bulk/historico" element={<BulkCampaignHistory />} />
+        <Route path="/messages/bulk/:id" element={<BulkCampaignDetail />} />
         <Route path="/turmas" element={<TurmasList />} />
         <Route path="/turmas/new" element={<TurmaForm />} />
         <Route path="/turmas/:id/edit" element={<TurmaForm />} />
@@ -89,6 +95,9 @@ export default function App() {
         <Route path="/contatos/new" element={<ContatoForm />} />
         <Route path="/contatos/import-excel" element={<ContatosImportExcel />} />
         <Route path="/contatos/:id/edit" element={<ContatoForm />} />
+        <Route path="/paises" element={<PaisesList />} />
+        <Route path="/paises/new" element={<PaisForm />} />
+        <Route path="/paises/:id/edit" element={<PaisForm />} />
         <Route path="/rules" element={<ScheduleRulesList />} />
         <Route path="/rules/new" element={<ScheduleRuleForm />} />
         <Route path="/rules/edit/:id" element={<ScheduleRuleForm />} />

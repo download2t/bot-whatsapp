@@ -133,6 +133,7 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
 
     private static bool TryNormalizeMessages(
         IReadOnlyList<ScheduleRuleMessageRequest>? messages,
+        IReadOnlySet<int> validPaisIds,
         out List<ScheduleRuleMessageRequest> normalized,
         out string? error)
     {
@@ -166,7 +167,13 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
                 return false;
             }
 
-            normalized.Add(new ScheduleRuleMessageRequest(text, days));
+            if (message.PaisId is not null && !validPaisIds.Contains(message.PaisId.Value))
+            {
+                error = $"Invalid PaisId: {message.PaisId}.";
+                return false;
+            }
+
+            normalized.Add(new ScheduleRuleMessageRequest(text, days, message.PaisId));
         }
 
         return true;
@@ -195,6 +202,13 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
         }
     }
 
+    private async Task<Dictionary<int, Pais>> GetOwnerPaisesAsync(int ownerUserId, CancellationToken cancellationToken)
+    {
+        return await dbContext.Paises
+            .Where(p => p.OwnerUserId == ownerUserId)
+            .ToDictionaryAsync(p => p.Id, cancellationToken);
+    }
+
     [HttpGet]
     public async Task<ActionResult<IEnumerable<ScheduleRuleResponse>>> GetAll(CancellationToken cancellationToken)
     {
@@ -205,7 +219,8 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
             .OrderBy(rule => rule.StartTime)
             .ToListAsync(cancellationToken);
 
-        var responses = BuildResponses(rules);
+        var paisById = await GetOwnerPaisesAsync(ownerUserId, cancellationToken);
+        var responses = BuildResponses(rules, paisById);
 
         return Ok(responses);
     }
@@ -221,7 +236,8 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
             return NotFound();
         }
 
-        return Ok(BuildResponses([rule])[0]);
+        var paisById = await GetOwnerPaisesAsync(ownerUserId, cancellationToken);
+        return Ok(BuildResponses([rule], paisById)[0]);
     }
 
     [HttpPost]
@@ -234,7 +250,8 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
             return BadRequest(windowError);
         }
 
-        if (!TryNormalizeMessages(request.Messages, out var normalizedMessages, out var messageError))
+        var paisById = await GetOwnerPaisesAsync(ownerUserId, cancellationToken);
+        if (!TryNormalizeMessages(request.Messages, paisById.Keys.ToHashSet(), out var normalizedMessages, out var messageError))
         {
             return BadRequest(messageError);
         }
@@ -257,7 +274,7 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
         dbContext.ScheduleRules.Add(rule);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return CreatedAtAction(nameof(GetById), new { id = rule.Id }, BuildResponses([rule])[0]);
+        return CreatedAtAction(nameof(GetById), new { id = rule.Id }, BuildResponses([rule], paisById)[0]);
     }
 
     [HttpPut("{id:int}")]
@@ -276,7 +293,8 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
             return BadRequest(windowError);
         }
 
-        if (!TryNormalizeMessages(request.Messages, out var normalizedMessages, out var messageError))
+        var paisById = await GetOwnerPaisesAsync(ownerUserId, cancellationToken);
+        if (!TryNormalizeMessages(request.Messages, paisById.Keys.ToHashSet(), out var normalizedMessages, out var messageError))
         {
             return BadRequest(messageError);
         }
@@ -292,7 +310,7 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
         rule.MaxDailyMessagesPerUser = request.MaxDailyMessagesPerUser;
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        return Ok(BuildResponses([rule])[0]);
+        return Ok(BuildResponses([rule], paisById)[0]);
     }
 
     [HttpDelete("{id:int}")]
@@ -311,7 +329,7 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
         return NoContent();
     }
 
-    private static List<ScheduleRuleResponse> BuildResponses(List<ScheduleRule> rules)
+    private static List<ScheduleRuleResponse> BuildResponses(List<ScheduleRule> rules, Dictionary<int, Pais> paisById)
     {
         var responses = new List<ScheduleRuleResponse>(rules.Count);
         foreach (var rule in rules)
@@ -325,10 +343,17 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
                 .ToList();
 
             var messages = GetRuleMessages(rule)
-                .Select(message => new ScheduleRuleMessageResponse(
-                    message.Text,
-                    message.Days,
-                    message.Days.Select(GetDayName).ToList()))
+                .Select(message =>
+                {
+                    var pais = message.PaisId is not null && paisById.TryGetValue(message.PaisId.Value, out var found) ? found : null;
+                    return new ScheduleRuleMessageResponse(
+                        message.Text,
+                        message.Days,
+                        message.Days.Select(GetDayName).ToList(),
+                        message.PaisId,
+                        pais?.Name,
+                        pais?.Ddi);
+                })
                 .ToList();
 
             responses.Add(new ScheduleRuleResponse(

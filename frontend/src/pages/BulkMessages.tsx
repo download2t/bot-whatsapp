@@ -1,60 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { apiFetch, getApiBase, getAuthHeaders } from '../lib/api'
-import type { BulkSendStreamEvent, Contato, Turma } from '../types'
-import { Card, CardHeader, CardTitle, Badge, EmptyState } from '../components/UI'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { apiFetch } from '../lib/api'
+import type { BulkCampaign, Contato, Turma } from '../types'
+import { Card, CardHeader, CardTitle, EmptyState } from '../components/UI'
 import { EmojiPicker } from '../components/EmojiPicker'
 import { MediaAttachment, type SelectedMedia } from '../components/MediaAttachment'
 import '../styles/modern.css'
 
-type RowStatus = 'pending' | 'sending' | 'sent' | 'failed' | 'skipped'
-
-type RowState = {
-  status: RowStatus
-  statusText: string
-}
-
-type SendSummary = {
-  sentCount: number
-  failedCount: number
-  remainingCount: number
-  totalCount: number
-  aborted: boolean
-  abortReason: string | null
-}
-
 const DEFAULT_INTERVAL_SECONDS = 60
 
-function getStatusLabel(status: RowStatus): string {
-  switch (status) {
-    case 'sending':
-      return 'Enviando'
-    case 'sent':
-      return 'Enviado'
-    case 'failed':
-      return 'Erro'
-    case 'skipped':
-      return 'Pendente'
-    default:
-      return 'Aguardando'
-  }
-}
-
-function getStatusVariant(status: RowStatus): 'success' | 'danger' | 'warning' | 'info' {
-  switch (status) {
-    case 'sent':
-      return 'success'
-    case 'failed':
-      return 'danger'
-    case 'sending':
-      return 'warning'
-    case 'skipped':
-      return 'info'
-    default:
-      return 'info'
-  }
-}
-
 export function BulkMessages() {
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const retryFromId = searchParams.get('retryFrom')
+
   const [turmas, setTurmas] = useState<Turma[]>([])
   const [selectedTurma, setSelectedTurma] = useState<number | ''>('')
   const [contacts, setContacts] = useState<Contato[]>([])
@@ -63,13 +22,12 @@ export function BulkMessages() {
   const [message, setMessage] = useState('')
   const [intervalSeconds, setIntervalSeconds] = useState<number>(DEFAULT_INTERVAL_SECONDS)
   const [loading, setLoading] = useState(false)
-  const [sending, setSending] = useState(false)
-  const [rows, setRows] = useState<Record<number, RowState>>({})
-  const [summary, setSummary] = useState<SendSummary | null>(null)
-  const [currentContactName, setCurrentContactName] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
   const [media, setMedia] = useState<SelectedMedia | null>(null)
-  const [mediaResetKey, setMediaResetKey] = useState(0)
+  const [retryNotice, setRetryNotice] = useState<string | null>(null)
   const messageRef = useRef<HTMLTextAreaElement>(null)
+
+  const isRetryMode = Boolean(retryFromId)
 
   const insertEmoji = (emoji: string) => {
     const textarea = messageRef.current
@@ -97,13 +55,58 @@ export function BulkMessages() {
     })()
   }, [])
 
+  // Retry mode: pull the original campaign + all owned contacts, then preselect only the
+  // recipients that didn't get a "Sent" result last time — still editable by hand, like today.
   useEffect(() => {
-    if (!selectedTurma) {
-      setContacts([])
-      setSelectedIds({})
-      setRows({})
-      setSummary(null)
-      setCurrentContactName(null)
+    if (!retryFromId) return
+
+    void (async () => {
+      setLoading(true)
+      try {
+        const [campaign, allContacts] = await Promise.all([
+          apiFetch<BulkCampaign>(`/api/messages/bulk/${retryFromId}`),
+          apiFetch<Contato[]>('/api/contatos'),
+        ])
+
+        const contactIds = campaign.items.map((item) => item.contactId)
+        const nonSentIds = new Set(
+          campaign.items.filter((item) => item.status !== 'Sent').map((item) => item.contactId),
+        )
+
+        const relevantContacts = allContacts.filter((c) => contactIds.includes(c.id))
+        setContacts(relevantContacts)
+
+        const map: Record<number, boolean> = {}
+        relevantContacts.forEach((c) => {
+          map[c.id] = nonSentIds.has(c.id)
+        })
+        setSelectedIds(map)
+
+        setGreeting(campaign.greeting)
+        setMessage(campaign.messageTemplate)
+        setIntervalSeconds(campaign.intervalSeconds)
+
+        const missing = contactIds.length - relevantContacts.length
+        setRetryNotice(
+          `Reenviando pendentes/falhas da campanha #${retryFromId}. ` +
+          `${nonSentIds.size} de ${relevantContacts.length} contato(s) pré-selecionado(s).` +
+          (missing > 0 ? ` ${missing} contato(s) daquela campanha não existem mais e foram ignorados.` : '') +
+          (campaign.mediaUrl ? ' Obs.: anexos não são copiados automaticamente — anexe novamente se precisar.' : '')
+        )
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Falha ao carregar campanha para reenvio')
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }, [retryFromId])
+
+  useEffect(() => {
+    if (isRetryMode || !selectedTurma) {
+      if (!isRetryMode) {
+        setContacts([])
+        setSelectedIds({})
+      }
       return
     }
 
@@ -116,9 +119,6 @@ export function BulkMessages() {
         const map: Record<number, boolean> = {}
         activeContacts.forEach(x => { map[x.id] = true })
         setSelectedIds(map)
-        setRows({})
-        setSummary(null)
-        setCurrentContactName(null)
       } catch (err) {
         alert(err instanceof Error ? err.message : 'Falha ao carregar contatos')
       } finally {
@@ -127,7 +127,7 @@ export function BulkMessages() {
     }
 
     void load()
-  }, [selectedTurma])
+  }, [selectedTurma, isRetryMode])
 
   const selectedContacts = useMemo(
     () => contacts.filter(contact => !!selectedIds[contact.id]),
@@ -144,230 +144,73 @@ export function BulkMessages() {
   }
   const deselectAll = () => setSelectedIds({})
 
-  const parseStreamEvent = (line: string): BulkSendStreamEvent | null => {
-    try {
-      return JSON.parse(line) as BulkSendStreamEvent
-    } catch {
-      return null
-    }
-  }
-
-  const applyEvent = (event: BulkSendStreamEvent, selectedContactIds: number[]) => {
-    if (event.type === 'sending') {
-      if (event.contactId != null) {
-        const contact = contacts.find(item => item.id === event.contactId)
-        setCurrentContactName(contact?.name ?? event.phoneNumber ?? null)
-        setRows(current => ({
-          ...current,
-          [event.contactId!]: {
-            status: 'sending',
-            statusText: event.status || 'Enviando mensagem...',
-          },
-        }))
-      }
-      setSummary({
-        sentCount: event.sentCount,
-        failedCount: event.failedCount,
-        remainingCount: event.remainingCount,
-        totalCount: event.totalCount,
-        aborted: false,
-        abortReason: null,
-      })
-      return
-    }
-
-    if (event.type === 'result') {
-      if (event.contactId != null) {
-        setCurrentContactName(null)
-        setRows(current => ({
-          ...current,
-          [event.contactId!]: {
-            status: event.success ? 'sent' : 'failed',
-            statusText: event.status || (event.success ? 'Mensagem entregue.' : 'Falha no envio.'),
-          },
-        }))
-      }
-
-      setSummary({
-        sentCount: event.sentCount,
-        failedCount: event.failedCount,
-        remainingCount: event.remainingCount,
-        totalCount: event.totalCount,
-        aborted: false,
-        abortReason: null,
-      })
-
-      return
-    }
-
-    if (event.type === 'aborted') {
-      setRows(current => {
-        const next = { ...current }
-        const skippedIds = selectedContactIds.filter(contactId => !current[contactId] || current[contactId].status === 'pending')
-
-        skippedIds.forEach(contactId => {
-          next[contactId] = {
-            status: 'skipped',
-            statusText: event.abortReason || event.status || 'Envio interrompido por bloqueio do WhatsApp.',
-          }
-        })
-
-        return next
-      })
-
-      setCurrentContactName(null)
-      setSummary({
-        sentCount: event.sentCount,
-        failedCount: event.failedCount,
-        remainingCount: event.remainingCount,
-        totalCount: event.totalCount,
-        aborted: true,
-        abortReason: event.abortReason || event.status,
-      })
-      return
-    }
-
-    if (event.type === 'completed') {
-      setCurrentContactName(null)
-      setSummary({
-        sentCount: event.sentCount,
-        failedCount: event.failedCount,
-        remainingCount: event.remainingCount,
-        totalCount: event.totalCount,
-        aborted: event.aborted,
-        abortReason: event.abortReason || event.status,
-      })
-    }
-  }
-
   const send = async () => {
     const ids = selectedContacts.map(contact => contact.id)
 
-    if (!selectedTurma || ids.length === 0) {
-      alert('Selecione uma turma e pelo menos um contato')
+    if (ids.length === 0) {
+      alert('Selecione pelo menos um contato')
       return
     }
 
-    const initialRows: Record<number, RowState> = {}
-    selectedContacts.forEach(contact => {
-      initialRows[contact.id] = { status: 'pending', statusText: 'Aguardando envio' }
-    })
-
-    setSending(true)
-    setRows(initialRows)
-    setSummary({
-      sentCount: 0,
-      failedCount: 0,
-      remainingCount: ids.length,
-      totalCount: ids.length,
-      aborted: false,
-      abortReason: null,
-    })
-    setCurrentContactName(null)
+    setSubmitting(true)
 
     try {
-      const response = await fetch(`${getApiBase()}/api/messages/bulk`, {
+      const campaign = await apiFetch<BulkCampaign>('/api/messages/bulk', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders(),
-        },
         body: JSON.stringify({
-          turmaId: selectedTurma,
+          turmaId: isRetryMode ? 0 : (selectedTurma || 0),
           contactIds: ids,
           greeting,
           message,
           intervalSeconds,
-          streamUpdates: true,
           mediaBase64: media?.base64 ?? null,
           mediaMimeType: media?.mimeType ?? null,
           mediaFileName: media?.fileName ?? null,
         }),
       })
 
-      if (!response.ok) {
-        const errorMessage = await response.text()
-        throw new Error(errorMessage || 'Falha ao enviar mensagens')
-      }
-
-      if (!response.body) {
-        throw new Error('A resposta de progresso não está disponível neste navegador.')
-      }
-
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-
-        if (done) {
-          break
-        }
-
-        buffer += decoder.decode(value, { stream: true })
-
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          const trimmedLine = line.trim()
-
-          if (!trimmedLine) {
-            continue
-          }
-
-          const event = parseStreamEvent(trimmedLine)
-          if (event) {
-            applyEvent(event, ids)
-          }
-        }
-      }
-
-      if (buffer.trim()) {
-        const finalEvent = parseStreamEvent(buffer.trim())
-        if (finalEvent) {
-          applyEvent(finalEvent, ids)
-        }
-      }
+      navigate(`/messages/bulk/${campaign.id}`)
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Falha ao enviar mensagens')
     } finally {
-      setSending(false)
+      setSubmitting(false)
     }
   }
-
-  const processedCount = summary ? summary.sentCount + summary.failedCount : 0
-  const progressPercent = summary && summary.totalCount > 0
-    ? Math.min(100, Math.round((processedCount / summary.totalCount) * 100))
-    : 0
 
   return (
     <div className="container" style={{ padding: '24px' }}>
       <h1>📤 Enviar Mensagens em Lote</h1>
 
-      <Card style={{ marginBottom: '24px' }}>
-        <CardHeader>
-          <CardTitle>1️⃣ Selecionar Turma</CardTitle>
-        </CardHeader>
-        <div>
-          <label htmlFor="turmaSelect">🎓 Escolha uma turma:</label>
-          <select
-            id="turmaSelect"
-            value={selectedTurma}
-            onChange={e => setSelectedTurma(e.target.value ? Number(e.target.value) : '')}
-            style={{ marginBottom: '16px' }}
-            disabled={sending}
-          >
-            <option value="">— Selecione uma turma —</option>
-            {turmas.filter(turma => turma.isActive).map(turma => (
-              <option key={turma.id} value={turma.id}>{turma.name}</option>
-            ))}
-          </select>
-        </div>
-      </Card>
+      {!isRetryMode && (
+        <Card style={{ marginBottom: '24px' }}>
+          <CardHeader>
+            <CardTitle>1️⃣ Selecionar Turma</CardTitle>
+          </CardHeader>
+          <div>
+            <label htmlFor="turmaSelect">🎓 Escolha uma turma:</label>
+            <select
+              id="turmaSelect"
+              value={selectedTurma}
+              onChange={e => setSelectedTurma(e.target.value ? Number(e.target.value) : '')}
+              style={{ marginBottom: '16px' }}
+              disabled={submitting}
+            >
+              <option value="">— Selecione uma turma —</option>
+              {turmas.filter(turma => turma.isActive).map(turma => (
+                <option key={turma.id} value={turma.id}>{turma.name}</option>
+              ))}
+            </select>
+          </div>
+        </Card>
+      )}
 
-      {selectedTurma && (
+      {isRetryMode && retryNotice && (
+        <div style={{ marginBottom: '24px', padding: '12px 16px', borderRadius: '8px', backgroundColor: '#eff6ff', border: '1px solid #3b82f6', color: '#1e3a8a', fontSize: '14px' }}>
+          {retryNotice}
+        </div>
+      )}
+
+      {(selectedTurma || isRetryMode) && (
         <>
           <Card style={{ marginBottom: '24px' }}>
             <CardHeader>
@@ -385,10 +228,10 @@ export function BulkMessages() {
             ) : (
               <>
                 <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-                  <button className="btn btn-primary btn-sm" onClick={selectAll} disabled={sending}>
+                  <button className="btn btn-primary btn-sm" onClick={selectAll} disabled={submitting}>
                     ✓ Selecionar Todos
                   </button>
-                  <button className="btn btn-secondary btn-sm" onClick={deselectAll} disabled={sending}>
+                  <button className="btn btn-secondary btn-sm" onClick={deselectAll} disabled={submitting}>
                     ✗ Desselecionar Todos
                   </button>
                 </div>
@@ -412,7 +255,7 @@ export function BulkMessages() {
                         type="checkbox"
                         checked={!!selectedIds[contact.id]}
                         onChange={() => toggle(contact.id)}
-                        disabled={sending}
+                        disabled={submitting}
                       />
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 500 }}>{contact.name}</div>
@@ -440,7 +283,7 @@ export function BulkMessages() {
                     value={greeting}
                     onChange={e => setGreeting(e.target.value)}
                     placeholder="Ex: Bom dia, Boa tarde, Olá"
-                    disabled={sending}
+                    disabled={submitting}
                   />
                   <small style={{ display: 'block', marginTop: '4px', color: '#666' }}>
                     Será seguida pelo nome do contato
@@ -456,7 +299,7 @@ export function BulkMessages() {
                     step={1}
                     value={intervalSeconds}
                     onChange={e => setIntervalSeconds(Math.max(1, Number(e.target.value) || DEFAULT_INTERVAL_SECONDS))}
-                    disabled={sending}
+                    disabled={submitting}
                   />
                   <small style={{ display: 'block', marginTop: '4px', color: '#666' }}>
                     Padrão: 60 segundos. Use 5, 10, 30, 60 etc.
@@ -472,15 +315,15 @@ export function BulkMessages() {
                     onChange={e => setMessage(e.target.value)}
                     placeholder="Digite sua mensagem aqui..."
                     style={{ minHeight: '150px' }}
-                    disabled={sending}
+                    disabled={submitting}
                   />
                   <small style={{ display: 'block', marginTop: '4px', color: '#666' }}>
                     Formato final: "[Saudação] [Nome]!\n[Sua mensagem]"
                   </small>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '12px' }}>
-                    <EmojiPicker onSelect={insertEmoji} disabled={sending} />
-                    <MediaAttachment key={mediaResetKey} onChange={setMedia} disabled={sending} />
+                    <EmojiPicker onSelect={insertEmoji} disabled={submitting} />
+                    <MediaAttachment onChange={setMedia} disabled={submitting} />
                   </div>
                 </div>
               </Card>
@@ -520,123 +363,15 @@ export function BulkMessages() {
                 <button
                   className="btn btn-primary btn-lg"
                   onClick={send}
-                  disabled={sending}
+                  disabled={submitting}
                   style={{ width: '100%' }}
                 >
-                  {sending ? '⏳ Enviando...' : '🚀 Enviar Mensagens'} ({selectedCount})
+                  {submitting ? '⏳ Iniciando envio...' : '🚀 Enviar Mensagens'} ({selectedCount})
                 </button>
               </div>
             </>
           )}
         </>
-      )}
-
-      {(sending || summary) && (
-        <Card>
-          <CardHeader>
-            <CardTitle>📊 Progresso do Envio</CardTitle>
-          </CardHeader>
-
-          <div style={{ marginBottom: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '14px' }}>
-              <span>{processedCount}/{summary?.totalCount || 0} processados</span>
-              <span>{progressPercent}%</span>
-            </div>
-            <div style={{ width: '100%', height: '10px', background: '#e5e7eb', borderRadius: '999px', overflow: 'hidden' }}>
-              <div
-                style={{
-                  width: `${progressPercent}%`,
-                  height: '100%',
-                  background: summary?.aborted ? '#ef4444' : '#10b981',
-                  transition: 'width 0.25s ease',
-                }}
-              />
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '16px' }}>
-            <div style={{ padding: '16px', backgroundColor: '#ecfdf5', borderRadius: '8px', border: '1px solid #10b981' }}>
-              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#065f46' }}>{summary?.sentCount || 0}</div>
-              <div style={{ color: '#065f46', fontSize: '14px' }}>Enviados</div>
-            </div>
-
-            <div style={{ padding: '16px', backgroundColor: '#fef2f2', borderRadius: '8px', border: '1px solid #ef4444' }}>
-              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#7f1d1d' }}>{summary?.failedCount || 0}</div>
-              <div style={{ color: '#7f1d1d', fontSize: '14px' }}>Falhas</div>
-            </div>
-
-            <div style={{ padding: '16px', backgroundColor: '#eff6ff', borderRadius: '8px', border: '1px solid #3b82f6' }}>
-              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1e3a8a' }}>{summary?.remainingCount ?? selectedCount}</div>
-              <div style={{ color: '#1e3a8a', fontSize: '14px' }}>Restantes</div>
-            </div>
-
-            <div style={{ padding: '16px', backgroundColor: '#f9fafb', borderRadius: '8px', border: '1px solid #d1d5db' }}>
-              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#111827' }}>{intervalSeconds}s</div>
-              <div style={{ color: '#374151', fontSize: '14px' }}>Intervalo</div>
-            </div>
-          </div>
-
-          {currentContactName && (
-            <div style={{ marginBottom: '16px', padding: '12px 16px', borderRadius: '8px', backgroundColor: '#fffbeb', border: '1px solid #f59e0b', color: '#92400e' }}>
-              Enviando agora: {currentContactName}
-            </div>
-          )}
-
-          {summary?.aborted && summary.abortReason && (
-            <div style={{ marginBottom: '16px', padding: '12px 16px', borderRadius: '8px', backgroundColor: '#fef2f2', border: '1px solid #ef4444', color: '#7f1d1d' }}>
-              Envio interrompido: {summary.abortReason}
-            </div>
-          )}
-
-          <div style={{ maxHeight: '420px', overflowY: 'auto' }}>
-            <table style={{ width: '100%' }}>
-              <thead>
-                <tr>
-                  <th>Contato</th>
-                  <th>Telefone</th>
-                  <th>Status</th>
-                  <th>Detalhe</th>
-                </tr>
-              </thead>
-              <tbody>
-                {selectedContacts.map(contact => {
-                  const row = rows[contact.id] || { status: 'pending' as RowStatus, statusText: 'Aguardando envio' }
-
-                  return (
-                    <tr key={contact.id}>
-                      <td>{contact.name}</td>
-                      <td><code style={{ background: '#f3f4f6', padding: '2px 8px' }}>{contact.phoneNumber}</code></td>
-                      <td>
-                        <Badge variant={getStatusVariant(row.status)}>
-                          {getStatusLabel(row.status)}
-                        </Badge>
-                      </td>
-                      <td style={{ fontSize: '12px', color: '#666' }}>{row.statusText}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          <div style={{ marginTop: '16px' }}>
-            <button
-              className="btn btn-secondary"
-              onClick={() => {
-                setRows({})
-                setSummary(null)
-                setCurrentContactName(null)
-                setGreeting('Bom dia')
-                setMessage('')
-                setMedia(null)
-                setMediaResetKey((key) => key + 1)
-              }}
-              disabled={sending}
-            >
-              🔄 Limpar resultados
-            </button>
-          </div>
-        </Card>
       )}
     </div>
   )

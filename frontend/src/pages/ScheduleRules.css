@@ -1056,6 +1056,56 @@
   cursor: pointer;
 }
 
+/* ===== ABAS PADRÃO / PAÍSES ===== */
+.pais-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.75rem 0;
+}
+
+.pais-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.9rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 999px;
+  background: white;
+  color: #555;
+  font-weight: 600;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pais-tab:hover:not(:disabled) {
+  border-color: #b7c0ec;
+}
+
+.pais-tab.active {
+  border-color: #667eea;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.14), rgba(124, 58, 237, 0.10));
+  color: #3d3d92;
+}
+
+.pais-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: rgba(102, 126, 234, 0.15);
+  color: #3d3d92;
+  font-size: 0.7rem;
+}
+
+.pais-tab.active .pais-tab-count {
+  background: rgba(102, 126, 234, 0.25);
+}
+
 /* ===== MENSAGENS POR DIA ===== */
 .day-coverage {
   display: flex;

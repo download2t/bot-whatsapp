@@ -928,7 +928,7 @@ app.post("/messages/send", async (req, res) => {
       success: true,
       sessionId: senderSession.id,
       sourceWhatsAppNumber: senderSession.phoneNumber,
-      messageId: result.id?._serialized ?? null,
+      messageId: result?.id?._serialized ?? null,
       unreadApplied,
     });
   } catch (error) {

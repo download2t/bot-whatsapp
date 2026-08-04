@@ -31,6 +31,16 @@ export type ScheduleRuleMessage = {
   text: string
   days: number[]
   dayNames: string[]
+  paisId: number | null
+  paisName: string | null
+  paisDdi: string | null
+}
+
+export type Pais = {
+  id: number
+  name: string
+  ddi: string
+  isActive: boolean
 }
 
 export type MessageLog = {
@@ -110,17 +120,44 @@ export type Contato = {
   isActive: boolean
 }
 
-export type BulkSendStreamEvent = {
-  type: 'sending' | 'result' | 'completed' | 'aborted'
-  contactId: number | null
-  phoneNumber: string | null
-  success: boolean | null
-  status: string | null
+export type BulkCampaignStatus = 'Running' | 'Completed' | 'Cancelled' | 'Aborted' | 'Interrupted'
+export type BulkCampaignItemStatus = 'Pending' | 'Sending' | 'Sent' | 'Failed' | 'Cancelled'
+
+export type BulkCampaignItem = {
+  id: number
+  contactId: number
+  contactName: string
+  phoneNumber: string
+  status: BulkCampaignItemStatus
+  statusDetail: string | null
+  processedAtUtc: string | null
+}
+
+export type BulkCampaign = {
+  id: number
+  greeting: string
+  messageTemplate: string
+  intervalSeconds: number
+  mediaUrl: string | null
+  mediaMimeType: string | null
+  mediaFileName: string | null
+  status: BulkCampaignStatus
+  abortReason: string | null
+  totalCount: number
   sentCount: number
   failedCount: number
-  remainingCount: number
+  createdAtUtc: string
+  finishedAtUtc: string | null
+  items: BulkCampaignItem[]
+}
+
+export type BulkCampaignListItem = {
+  id: number
+  messageTemplate: string
+  status: BulkCampaignStatus
   totalCount: number
-  completed: boolean
-  aborted: boolean
-  abortReason: string | null
+  sentCount: number
+  failedCount: number
+  createdAtUtc: string
+  finishedAtUtc: string | null
 }

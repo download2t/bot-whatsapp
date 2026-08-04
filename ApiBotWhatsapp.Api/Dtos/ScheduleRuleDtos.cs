@@ -4,9 +4,15 @@ public record ScheduleRuleTimeWindowRequest(int DayOfWeek, string StartTime, str
 
 public record ScheduleRuleTimeWindowResponse(int DayOfWeek, string DayName, string StartTime, string EndTime);
 
-public record ScheduleRuleMessageRequest(string Text, IReadOnlyList<int> Days);
+public record ScheduleRuleMessageRequest(string Text, IReadOnlyList<int> Days, int? PaisId = null);
 
-public record ScheduleRuleMessageResponse(string Text, IReadOnlyList<int> Days, IReadOnlyList<string> DayNames);
+public record ScheduleRuleMessageResponse(
+    string Text,
+    IReadOnlyList<int> Days,
+    IReadOnlyList<string> DayNames,
+    int? PaisId,
+    string? PaisName,
+    string? PaisDdi);
 
 public record ScheduleRuleRequest(
     string Name,

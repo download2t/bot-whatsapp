@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
-import type { ScheduleRule } from '../types'
+import type { Pais, ScheduleRule } from '../types'
 import './ScheduleRules.css'
 
 type WindowForm = {
@@ -13,6 +13,8 @@ type WindowForm = {
 type MessageForm = {
   text: string
   days: number[]
+  paisId: number | null
+  paisName: string | null
 }
 
 type FormData = {
@@ -46,12 +48,25 @@ export function ScheduleRuleForm() {
   const [form, setForm] = useState<FormData>({
     name: '',
     windows: [{ dayOfWeek: 1, ...DEFAULT_RANGE }, { dayOfWeek: 2, ...DEFAULT_RANGE }, { dayOfWeek: 3, ...DEFAULT_RANGE }, { dayOfWeek: 4, ...DEFAULT_RANGE }, { dayOfWeek: 5, ...DEFAULT_RANGE }],
-    messages: [{ text: '', days: [] }],
+    messages: [{ text: '', days: [], paisId: null, paisName: null }],
     isEnabled: true,
     throttleMinutes: 0,
     isOutOfBusinessHours: false,
     maxDailyMessagesPerUser: null,
   })
+  const [paises, setPaises] = useState<Pais[]>([])
+  const [activeTab, setActiveTab] = useState<number | null>(null)
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const data = await apiFetch<Pais[]>('/api/paises')
+        setPaises((data || []).filter(p => p.isActive))
+      } catch {
+        // Não impede o formulário de funcionar só com mensagens padrão
+      }
+    })()
+  }, [])
 
   useEffect(() => {
     if (id) {
@@ -72,8 +87,8 @@ export function ScheduleRuleForm() {
         name: rule.name,
         windows,
         messages: rule.messages && rule.messages.length > 0
-          ? rule.messages.map(m => ({ text: m.text, days: m.days }))
-          : [{ text: '', days: [] }],
+          ? rule.messages.map(m => ({ text: m.text, days: m.days, paisId: m.paisId, paisName: m.paisName }))
+          : [{ text: '', days: [], paisId: null, paisName: null }],
         isEnabled: rule.isEnabled,
         throttleMinutes: rule.throttleMinutes,
         isOutOfBusinessHours: rule.isOutOfBusinessHours,
@@ -140,13 +155,14 @@ export function ScheduleRuleForm() {
   // ----- Per-day messages helpers -----
 
   const addMessage = () => {
-    setForm(prev => ({ ...prev, messages: [...prev.messages, { text: '', days: [] }] }))
+    const activePaisName = activeTab !== null ? paises.find(p => p.id === activeTab)?.name ?? null : null
+    setForm(prev => ({ ...prev, messages: [...prev.messages, { text: '', days: [], paisId: activeTab, paisName: activePaisName }] }))
   }
 
   const removeMessage = (index: number) => {
     setForm(prev => ({
       ...prev,
-      messages: prev.messages.length > 1 ? prev.messages.filter((_, i) => i !== index) : prev.messages,
+      messages: prev.messages.filter((_, i) => i !== index),
     }))
   }
 
@@ -170,14 +186,39 @@ export function ScheduleRuleForm() {
     })
   }
 
-  const coveredDays = useMemo(() => new Set(form.messages.flatMap(m => m.days)), [form.messages])
+  // Tabs: "Padrão" (paisId null) sempre presente, um por país ativo cadastrado, e um extra pra
+  // qualquer paisId que já exista nas mensagens da regra mas não esteja mais na lista de países
+  // ativos (país foi desativado depois de já estar em uso aqui) — assim a mensagem nunca some
+  // silenciosamente da tela mesmo que o país tenha saído da lista principal.
+  const tabs = useMemo(() => {
+    const known = new Map<number | null, string>()
+    known.set(null, '🌐 Padrão')
+    paises.forEach(p => known.set(p.id, `${p.name} (+${p.ddi})`))
+
+    const orphanMessages = form.messages.filter(m => m.paisId !== null && !known.has(m.paisId))
+    orphanMessages.forEach(m => known.set(m.paisId, `${m.paisName ?? `País #${m.paisId}`} (inativo)`))
+
+    return Array.from(known.entries()).map(([paisId, label]) => ({ paisId, label }))
+  }, [paises, form.messages])
+
+  const messagesWithIndex = useMemo(
+    () => form.messages.map((message, index) => ({ ...message, index })),
+    [form.messages]
+  )
+
+  const visibleMessages = useMemo(
+    () => messagesWithIndex.filter(m => m.paisId === activeTab),
+    [messagesWithIndex, activeTab]
+  )
+
+  const coveredDays = useMemo(() => new Set(visibleMessages.flatMap(m => m.days)), [visibleMessages])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
 
-    const trimmedMessages = form.messages.map(m => ({ text: m.text.trim(), days: m.days }))
+    const trimmedMessages = form.messages.map(m => ({ text: m.text.trim(), days: m.days, paisId: m.paisId }))
     const hasEmptyMessageText = trimmedMessages.some(m => !m.text)
     const hasMessageWithoutDay = trimmedMessages.some(m => m.days.length === 0)
 
@@ -381,8 +422,32 @@ export function ScheduleRuleForm() {
           <fieldset className="form-section">
             <legend>💬 Mensagens automáticas</legend>
             <small className="messages-hint">
-              Crie quantas mensagens precisar e vincule cada uma aos dias em que ela deve ser usada.
+              Clique em um país para gerenciar as mensagens específicas dele. Quem não bater com nenhum país cadastrado recebe as mensagens de "Padrão".
             </small>
+
+            {paises.length === 0 && (
+              <small className="messages-hint" style={{ display: 'block', marginTop: '4px' }}>
+                Cadastre países em <Link to="/paises">Países</Link> para segmentar mensagens por DDI (ex: uma mensagem diferente para Moçambique).
+              </small>
+            )}
+
+            <div className="pais-tabs">
+              {tabs.map(tab => {
+                const count = form.messages.filter(m => m.paisId === tab.paisId).length
+                return (
+                  <button
+                    type="button"
+                    key={tab.paisId ?? 'default'}
+                    className={`pais-tab ${activeTab === tab.paisId ? 'active' : ''}`}
+                    onClick={() => setActiveTab(tab.paisId)}
+                    disabled={submitting}
+                  >
+                    {tab.label}
+                    {count > 0 && <span className="pais-tab-count">{count}</span>}
+                  </button>
+                )
+              })}
+            </div>
 
             <div className="day-coverage">
               {DAY_OPTIONS.map(option => (
@@ -393,15 +458,21 @@ export function ScheduleRuleForm() {
             </div>
 
             <div className="message-block-list">
-              {form.messages.map((message, index) => (
-                <div key={index} className="message-block">
+              {visibleMessages.length === 0 && (
+                <p className="messages-hint" style={{ margin: 0 }}>
+                  Nenhuma mensagem para {tabs.find(t => t.paisId === activeTab)?.label ?? 'este país'} ainda.
+                </p>
+              )}
+
+              {visibleMessages.map((message, order) => (
+                <div key={message.index} className="message-block">
                   <div className="message-block-header">
-                    <strong>Mensagem {index + 1}</strong>
+                    <strong>Mensagem {order + 1}</strong>
                     <button
                       type="button"
                       className="btn btn-danger btn-sm"
-                      onClick={() => removeMessage(index)}
-                      disabled={submitting || form.messages.length === 1}
+                      onClick={() => removeMessage(message.index)}
+                      disabled={submitting}
                     >
                       🗑
                     </button>
@@ -409,7 +480,7 @@ export function ScheduleRuleForm() {
 
                   <textarea
                     value={message.text}
-                    onChange={(e) => updateMessageText(index, e.target.value)}
+                    onChange={(e) => updateMessageText(message.index, e.target.value)}
                     placeholder="Digite a mensagem que será enviada..."
                     rows={2}
                     disabled={submitting}
@@ -421,7 +492,7 @@ export function ScheduleRuleForm() {
                         type="button"
                         key={option.value}
                         className={`day-chip clickable ${message.days.includes(option.value) ? 'active' : ''}`}
-                        onClick={() => toggleMessageDay(index, option.value)}
+                        onClick={() => toggleMessageDay(message.index, option.value)}
                         disabled={submitting}
                       >
                         {option.short}
@@ -433,7 +504,7 @@ export function ScheduleRuleForm() {
             </div>
 
             <button type="button" className="btn btn-secondary btn-sm" onClick={addMessage} disabled={submitting} style={{ marginTop: '10px' }}>
-              ➕ Adicionar mensagem
+              ➕ Adicionar mensagem {activeTab !== null ? `para ${tabs.find(t => t.paisId === activeTab)?.label}` : 'padrão'}
             </button>
           </fieldset>
         </div>

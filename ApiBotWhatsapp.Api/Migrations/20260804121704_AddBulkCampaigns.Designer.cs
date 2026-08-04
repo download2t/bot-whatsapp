@@ -3,6 +3,7 @@ using System;
 using ApiBotWhatsapp.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ApiBotWhatsapp.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260804121704_AddBulkCampaigns")]
+    partial class AddBulkCampaigns
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.3");
@@ -240,39 +243,6 @@ namespace ApiBotWhatsapp.Api.Migrations
                     b.HasIndex("OwnerUserId", "WhatsAppNumber", "TimestampUtc");
 
                     b.ToTable("MessageLogs");
-                });
-
-            modelBuilder.Entity("ApiBotWhatsapp.Api.Models.Pais", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Ddi")
-                        .IsRequired()
-                        .HasMaxLength(5)
-                        .HasColumnType("TEXT");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("OwnerUserId")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("OwnerUserId", "Ddi")
-                        .IsUnique();
-
-                    b.ToTable("Paises");
                 });
 
             modelBuilder.Entity("ApiBotWhatsapp.Api.Models.ScheduleRule", b =>

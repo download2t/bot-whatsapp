@@ -36,6 +36,15 @@ function summarizeMessages(rule: ScheduleRule): string {
   return `${count} ${messageLabel} · cobre ${daysCovered} ${dayLabel} da semana`
 }
 
+function getCoveredPaisNames(rule: ScheduleRule): string[] {
+  const names = new Set(
+    rule.messages
+      .filter(m => m.paisId !== null && m.paisName)
+      .map(m => m.paisName as string)
+  )
+  return Array.from(names)
+}
+
 export function ScheduleRulesList() {
   const [rules, setRules] = useState<ScheduleRule[]>([])
   const [loading, setLoading] = useState(true)
@@ -83,7 +92,7 @@ export function ScheduleRulesList() {
           startTime: updated.startTime,
           endTime: updated.endTime,
           windows: updated.windows,
-          messages: updated.messages.map(m => ({ text: m.text, days: m.days })),
+          messages: updated.messages.map(m => ({ text: m.text, days: m.days, paisId: m.paisId })),
           isEnabled: updated.isEnabled,
           throttleMinutes: updated.throttleMinutes,
           isOutOfBusinessHours: updated.isOutOfBusinessHours,
@@ -141,6 +150,13 @@ export function ScheduleRulesList() {
 
               <div className="rule-content">
                 <p className="message-summary">💬 {summarizeMessages(rule)}</p>
+                {getCoveredPaisNames(rule).length > 0 && (
+                  <p className="message-summary" style={{ marginTop: '4px' }}>
+                    🌎 Países: {getCoveredPaisNames(rule).map(name => (
+                      <span key={name} className="config-badge" style={{ marginRight: '4px' }}>{name}</span>
+                    ))}
+                  </p>
+                )}
                 {rule.messages[0] && (
                   <p className="message-preview-compact">
                     <strong>{rule.messages[0].dayNames.join(', ')}:</strong> {rule.messages[0].text}
