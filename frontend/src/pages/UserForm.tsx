@@ -22,8 +22,11 @@ export function UserForm() {
     cpf: '',
     fullName: '',
     title: '',
-    isAdmin: false
+    isAdmin: false,
+    isActive: true
   })
+
+  const isEditingSelf = !isNew && form.username !== '' && form.username === localStorage.getItem('bot_user')
 
   useEffect(() => {
     if (!isNew && id) {
@@ -43,7 +46,8 @@ export function UserForm() {
         cpf: data.cpf || '',
         fullName: data.fullName || '',
         title: data.title || '',
-        isAdmin: data.isAdmin === true
+        isAdmin: data.isAdmin === true,
+        isActive: data.isActive !== false
       })
       setError(null)
     } catch (err) {
@@ -80,7 +84,8 @@ export function UserForm() {
             cpf: form.cpf.trim() || null,
             fullName: form.fullName.trim() || null,
             title: form.title || null,
-            isAdmin: isCurrentUserAdmin ? form.isAdmin : false
+            isAdmin: isCurrentUserAdmin ? form.isAdmin : false,
+            isActive: isCurrentUserAdmin ? form.isActive : true
           })
         })
         alert('Usuário criado com sucesso')
@@ -94,7 +99,8 @@ export function UserForm() {
             cpf: form.cpf.trim() || null,
             fullName: form.fullName.trim() || null,
             title: form.title || null,
-            isAdmin: isCurrentUserAdmin ? form.isAdmin : undefined
+            isAdmin: isCurrentUserAdmin ? form.isAdmin : undefined,
+            isActive: isCurrentUserAdmin ? (isEditingSelf ? true : form.isActive) : undefined
           })
         })
         alert('Usuário atualizado com sucesso')
@@ -200,6 +206,25 @@ export function UserForm() {
               />
               Usuário administrador
             </label>
+          </div>
+        )}
+
+        {isCurrentUserAdmin && (
+          <div className="form-group checkbox-row">
+            <label title={isEditingSelf ? 'Não é possível desativar sua própria conta' : undefined}>
+              <input
+                type="checkbox"
+                checked={form.isActive}
+                disabled={isEditingSelf}
+                onChange={(e) => setForm({ ...form, isActive: e.target.checked })}
+              />
+              Conta ativa
+            </label>
+            {isEditingSelf && (
+              <small style={{ display: 'block', color: '#888', marginTop: '4px' }}>
+                Você não pode desativar sua própria conta.
+              </small>
+            )}
           </div>
         )}
 

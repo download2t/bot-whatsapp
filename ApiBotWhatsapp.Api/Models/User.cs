@@ -8,6 +8,8 @@ public class User
 
     public bool IsAdmin { get; set; }
 
+    public bool IsActive { get; set; } = true;
+
     [Required]
     [MaxLength(80)]
     public string Username { get; set; } = string.Empty;

@@ -83,6 +83,7 @@ export type UserProfile = {
   id: number
   username: string
   isAdmin?: boolean
+  isActive?: boolean
   email?: string | null
   phone?: string | null
   cpf?: string | null
@@ -96,6 +97,7 @@ export type UserListItem = {
   id: number
   username: string
   isAdmin?: boolean
+  isActive?: boolean
   email?: string | null
   phone?: string | null
   fullName?: string | null

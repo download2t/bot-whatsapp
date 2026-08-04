@@ -1,317 +1,247 @@
-# Passo a passo de deploy na Hostinger
+# Manual de Operação e Deploy — BOTZAP (mydevsystem.site)
 
-Este projeto deve ser publicado em **VPS Linux** da Hostinger, não em hospedagem compartilhada, porque ele precisa manter processos ativos para a API, o frontend buildado e o bridge do WhatsApp.
+Este projeto roda em **VPS Linux** (Hostinger, Ubuntu), porque precisa manter processos ativos
+para a API, o frontend buildado e o bridge do WhatsApp — não funciona em hospedagem
+compartilhada.
 
-## 1. O que vai rodar no servidor
+*Última revisão: 04/08/2026 — servidor confirmado rodando .NET 10 SDK (mesma versão do
+ambiente de desenvolvimento).*
 
-- **API**: `ApiBotWhatsapp.Api` em ASP.NET Core
-- **Frontend**: React + Vite em arquivos estáticos gerados com build
-- **Bridge**: `whatsapp-bridge` em Node.js com `whatsapp-web.js`
+## 1. O que roda no servidor
+
+- **API**: `ApiBotWhatsapp.Api` em ASP.NET Core, escutando em `127.0.0.1:5207`
+- **Frontend**: React + Vite, build estático servido pelo Nginx
+- **Bridge**: `whatsapp-bridge` em Node.js (`whatsapp-web.js`), escutando em `127.0.0.1:3001`
 - **Reverse proxy**: Nginx na frente da API e do frontend
 
-## 2. Tipo de hospedagem recomendado
+## 2. Estrutura de arquivos e configurações (vital)
 
-Use uma **VPS Ubuntu 22.04 ou 24.04** na Hostinger.
+Para o sistema funcionar, estes arquivos precisam existir exatamente nestas localizações. Se o
+servidor for migrado ou reinstalado, recrie-os com exatidão.
 
-Recomendação prática:
+### 2.1 Variáveis de ambiente da API (C#)
 
-- 2 vCPU ou mais
-- 4 GB de RAM ou mais
-- SSD com espaço suficiente para logs, banco SQLite e sessões do WhatsApp
-
-## 3. Preparar o servidor
-
-1. Acesse o servidor por SSH.
-2. Atualize os pacotes do sistema.
-3. Instale dependências base:
-
-```bash
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y nginx git curl unzip
-```
-
-4. Instale o Docker e o Docker Compose, se for usar containerização.
-
-## 4. Publicar o código
-
-1. Envie o projeto para o servidor com `git clone` ou upload.
-2. Organize a estrutura em um diretório, por exemplo:
-
-```text
-/opt/api_bot_whatsapp
-```
-
-3. Mantenha estes diretórios separados:
-
-- `ApiBotWhatsapp.Api`
-- `frontend`
-- `whatsapp-bridge`
-
-## 5. Configurar a API
-
-Na pasta `ApiBotWhatsapp.Api`, crie o arquivo `.env` com as variáveis de produção.
-
-Exemplo:
+Caminho: `/opt/mydevsystem/publish/api/.env`
 
 ```env
-ConnectionStrings__DefaultConnection=Data Source=/opt/api_bot_whatsapp/data/app.db
-Jwt__SigningKey=chave_forte_e_longa
+ConnectionStrings__DefaultConnection=Data Source=/opt/mydevsystem/data/app.db
+Cors__AllowedOrigins__0=https://mydevsystem.site
+Cors__AllowedOrigins__1=https://www.mydevsystem.site
 Jwt__Issuer=ApiBotWhatsapp
-Jwt__Audience=ApiBotWhatsappFrontend
+Jwt__Audience=ApiBotWhatsappClient
 Jwt__ExpiresMinutes=120
+Jwt__SigningKey=8f3d2a1c7b9e4f0d6a5c1e8f2d4b6a9c3e1f7a2d4c6b8e0f1a3d5c7b9e1f4a6
 WhatsApp__BridgeBaseUrl=http://127.0.0.1:3001
 WhatsApp__TimeZoneId=America/Sao_Paulo
-WhatsApp__WebhookToken=token_compartilhado_com_bridge
-WhatsApp__DefaultConnectedNumber=
-Cors__AllowedOrigins=https://seu-dominio.com
+WhatsApp__WebhookToken=MeuTokenSecretoBridge123
 ```
 
-Observações:
+O caminho do banco (`ConnectionStrings__DefaultConnection`) deve apontar para um volume
+persistente, fora da pasta de publish (que é apagada e recriada a cada deploy).
 
-- a API usa **SQLite** por padrão
-- o caminho do banco deve apontar para um volume persistente
-- o CORS precisa liberar o domínio público do frontend
+### 2.2 Variáveis de ambiente do Bridge (Node.js)
 
-## 6. Configurar o bridge do WhatsApp
-
-Na pasta `whatsapp-bridge`, crie outro `.env`:
+Caminho: `/opt/mydevsystem/whatsapp-bridge/.env`
 
 ```env
 BRIDGE_PORT=3001
 BACKEND_WEBHOOK_URL=http://127.0.0.1:5207/api/webhooks/whatsapp
-BACKEND_WEBHOOK_TOKEN=token_compartilhado_com_bridge
+BACKEND_WEBHOOK_TOKEN=MeuTokenSecretoBridge123
 ```
 
-Observações:
+`BACKEND_WEBHOOK_TOKEN` precisa ser **idêntico** a `WhatsApp__WebhookToken` da API.
 
-- `BACKEND_WEBHOOK_TOKEN` deve ser igual ao token configurado na API
-- o bridge precisa ficar sempre ligado
-- o login do WhatsApp Web será salvo em `.wwebjs_auth`
+### 2.3 Configuração do Nginx (proxy reverso)
 
-## 7. Build do frontend
+Caminho: `/etc/nginx/sites-enabled/mydevsystem.site.conf`
 
-Na pasta `frontend`:
+```nginx
+server {
+    listen 80;
+    server_name mydevsystem.site www.mydevsystem.site;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name mydevsystem.site www.mydevsystem.site;
+    ssl_certificate /etc/letsencrypt/live/mydevsystem.site/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/mydevsystem.site/privkey.pem;
+
+    root /var/www/mydevsystem/ui;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Rota específica do WhatsApp para evitar conflitos
+    location /api/whatsapp/ {
+        rewrite ^/api/whatsapp/(.*)$ /api/whatsapp/$1 break;
+        proxy_pass http://127.0.0.1:5207;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+    }
+
+    # Rota padrão para a API
+    location /api/ {
+        proxy_pass http://127.0.0.1:5207;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    # Mídias enviadas/recebidas (fotos, vídeos, documentos do chat) — a API serve isso
+    # como estático a partir de wwwroot/uploads/. Sem esta rota, imagens não aparecem no
+    # navegador (só o nome do arquivo).
+    location /uploads/ {
+        proxy_pass http://127.0.0.1:5207;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+### 2.4 Serviços systemd
+
+`/etc/systemd/system/mydev_api.service`:
+
+```ini
+[Unit]
+Description=API Bot Whatsapp - .NET Core
+
+[Service]
+User=root
+WorkingDirectory=/opt/mydevsystem/publish/api
+ExecStart=/usr/bin/dotnet ApiBotWhatsapp.Api.dll --urls http://127.0.0.1:5207
+Restart=always
+RestartSec=10
+SyslogIdentifier=mydev-api
+Environment=ASPNETCORE_ENVIRONMENT=Production
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`mydev_bridge.service` segue o mesmo padrão, com `WorkingDirectory` apontando para
+`/opt/mydevsystem/whatsapp-bridge` e `ExecStart` chamando `node index.js` (ou via `npm start`).
+
+## 3. Preparar um servidor novo (do zero)
+
+1. Acesse por SSH, atualize os pacotes e instale dependências base:
+   ```bash
+   sudo apt update && sudo apt upgrade -y
+   sudo apt install -y nginx git curl unzip
+   ```
+2. Instale o SDK .NET 10 e o Node.js (versão compatível com `whatsapp-web.js`).
+3. Clone o repositório em `/opt/mydevsystem`.
+4. Crie os arquivos `.env` da API e do bridge (seção 2.1/2.2).
+5. Crie a pasta de dados persistente (`/opt/mydevsystem/data/`) e garanta que o usuário do
+   serviço (`mydev_api`) tenha permissão de leitura/escrita nela.
+6. Configure o Nginx (seção 2.3) e obtenha o certificado SSL com Let's Encrypt.
+7. Crie os serviços systemd (seção 2.4).
+8. Rode o deploy padrão (seção 4) pela primeira vez.
+9. Suba na ordem: banco/dados persistentes → API → Bridge → Frontend/Nginx.
+10. Valide: `GET /health` na API e no bridge, login no painel, conexão do WhatsApp via QR.
+
+## 4. Deploy padrão (cheat sheet)
+
+Siga esta ordem sempre que atualizar código, com ou sem mudança de banco.
 
 ```bash
-npm install
-npm run build
-```
+cd /opt/mydevsystem
 
-O resultado sai em `dist/`.
-
-Depois disso, copie o conteúdo de `dist/` para uma pasta servida pelo Nginx, por exemplo:
-
-```text
-/var/www/api_bot_whatsapp
-```
-
-## 8. Build e execução da API
-
-Se for publicar como processo .NET:
-
-```bash
-cd ApiBotWhatsapp.Api
-dotnet publish -c Release -o /opt/api_bot_whatsapp/publish/api
-```
-
-Depois crie um serviço para manter a API ativa.
-
-Se for usar Docker, crie um container com a aplicação publicada e exponha a porta interna da API.
-
-## 9. Execução do bridge
-
-Na pasta `whatsapp-bridge`:
-
-```bash
-npm install
-npm start
-```
-
-Se estiver em produção, mantenha o processo com `systemd`, `pm2` ou Docker.
-
-## 10. Configurar o Nginx
-
-Use o Nginx como entrada pública do sistema.
-
-Sugestão de rotas:
-
-- `https://seu-dominio.com/` -> frontend estático
-- `https://seu-dominio.com/api/` -> API ASP.NET Core
-
-Exemplo de ideia:
-
-- frontend servido em `/var/www/api_bot_whatsapp`
-- API escutando em `127.0.0.1:5207`
-- bridge escutando em `127.0.0.1:3001`
-
-## 11. SSL e domínio
-
-1. Aponte o domínio para o IP da VPS.
-2. No painel da Hostinger, adicione o domínio.
-3. Configure certificado SSL com Let’s Encrypt.
-4. Forçe HTTPS no Nginx.
-
-## 12. Ordem de subida
-
-Suba nesta ordem:
-
-1. Banco e arquivos persistentes
-2. API
-3. Bridge
-4. Frontend estático e Nginx
-
-## 13. Verificações rápidas
-
-Teste estes pontos:
-
-- `https://seu-dominio.com/health`
-- `https://seu-dominio.com/swagger` durante a validação inicial
-- `http://127.0.0.1:3001/health`
-- login do WhatsApp Web no bridge
-- recebimento de webhook do WhatsApp na API
-
-## 14. Cuidados importantes
-
-- não use hospedagem compartilhada para este projeto
-- não apague a pasta `.wwebjs_auth` se quiser manter a sessão do WhatsApp
-- faça backup do banco SQLite com frequência
-- mantenha os tokens da API e do bridge iguais
-- valide as origens do CORS antes de publicar
-
-## 15. Resumo da arquitetura recomendada
-
-O desenho mais estável na Hostinger é:
-
-```text
-Usuário -> Nginx -> Frontend estático
-Usuário -> Nginx -> API ASP.NET Core
-Bridge WhatsApp -> API via webhook local
-```
-
-Se quiser simplificar ainda mais, eu posso te entregar a próxima versão deste arquivo com:
-
-- `docker-compose.yml`
-- configuração do `nginx.conf`
-- exemplos de `.env`
-- comandos de deploy e atualização
-
-## 16. Atualizar produção com as mudanças desta sessão (isolamento por usuário + mídia/ack + LID)
-
-Este é o procedimento **específico** para levar para produção tudo que foi feito nesta sessão:
-remoção do multi-tenant, isolamento total por usuário (`OwnerUserId`, 1 WhatsApp por usuário),
-correções de LID, mídia persistida em disco, confirmação de leitura (ack) e a página de
-Documentar Conversa. Use isto **uma única vez** — depois que essas migrations estiverem
-marcadas como aplicadas, os próximos `git pull` + deploy voltam a ser o fluxo normal (a própria
-API já roda `Database.MigrateAsync()` no boot, então normalmente nem precisa rodar `dotnet ef`
-manualmente).
-
-### 16.1 Contexto importante antes de começar
-
-O banco de produção foi criado historicamente com `EnsureCreated()` + SQL manual, não com
-`dotnet ef database update`. Isso significa que a tabela `__EFMigrationsHistory` de lá está
-**vazia**, mesmo o banco já tendo o schema das 3 primeiras migrations do projeto
-(`InitialCreate`, `AddContactNameMessageLog`, `AddScheduleWindowsJson`). Se você rodar
-`dotnet ef database update` direto, o EF tenta aplicar essas 3 migrations de novo do zero e
-quebra (colunas/tabelas já existem). Por isso o passo 16.3 abaixo "baselina" o histórico antes
-de deixar o EF seguir com as migrations novas de verdade.
-
-As migrations que ainda **não** estão em produção (as que essa sessão criou) são:
-
-1. `20260731131436_RemoveMultiTenantAndWhitelist` — remove `Company`/`UserCompany`/`WhitelistNumber`, adiciona `MessagesJson`/`MessageId`.
-2. `20260731132421_AddOwnerUserIsolation` — adiciona `OwnerUserId` em `Turmas`/`ScheduleRules`/`MessageLogs`/`Contatos` (com backfill automático para o usuário `admin`), remove `ScheduleRuleWhatsAppNumbers`.
-3. `20260731170322_AddMediaAndAckToMessageLogs` — adiciona `MediaUrl`/`MediaMimeType`/`MediaFileName`/`AckStatus` em `MessageLogs`.
-
-Essas 3 rodam de verdade e alteram dados (a #2 reatribui todos os Contatos/Turmas/Regras/Mensagens
-existentes para o usuário `admin` — é o comportamento esperado, combinado nesta sessão).
-
-### 16.2 Backup (obrigatório, sem exceção)
-
-```bash
-cd /opt/api_bot_whatsapp/ApiBotWhatsapp.Api   # ajuste para o caminho real do seu deploy
-cp app.db "app.db.backup-$(date +%Y%m%d-%H%M%S)"
-```
-
-Não prossiga sem esse backup. Se algo sair errado, restaurar esse arquivo é o caminho de volta.
-
-### 16.3 Baselinar o histórico de migrations (uma vez só)
-
-Confirme primeiro que a tabela está mesmo vazia (evita duplicar se alguém já rodou isso antes):
-
-```bash
-sqlite3 app.db "SELECT * FROM __EFMigrationsHistory;"
-```
-
-Se vier vazio, insira as 3 migrations antigas como já aplicadas (sem executá-las — o schema
-delas já existe no banco):
-
-```bash
-sqlite3 app.db "INSERT INTO __EFMigrationsHistory (MigrationId, ProductVersion) VALUES
-  ('20260506114638_InitialCreate', '10.0.3'),
-  ('20260625122146_AddContactNameMessageLog', '10.0.3'),
-  ('20260702170000_AddScheduleWindowsJson', '10.0.3');"
-```
-
-Se a consulta acima já mostrou essas 3 linhas (ou parte delas), **não repita o INSERT** — pule
-direto para o 16.4.
-
-### 16.4 git pull e aplicar as migrations novas
-
-```bash
-cd /opt/api_bot_whatsapp
+# 1. Baixar o código novo
+git stash
 git pull
-cd ApiBotWhatsapp.Api
-dotnet tool update --global dotnet-ef --version 10.0.3   # se ainda não estiver nessa versão
+
+# 2. Parar os serviços (libera arquivos e banco)
+sudo systemctl stop mydev_api mydev_bridge
+
+# 3. Backup do banco ANTES de migrar — sem exceção
+cp /opt/mydevsystem/data/app.db /opt/mydevsystem/data/app.db.backup-$(date +%Y%m%d-%H%M%S)
+
+# 4. Atualizar o banco (Entity Framework)
+cd /opt/mydevsystem/ApiBotWhatsapp.Api
+ASPNETCORE_ENVIRONMENT=Production \
+Jwt__SigningKey=8f3d2a1c7b9e4f0d6a5c1e8f2d4b6a9c3e1f7a2d4c6b8e0f1a3d5c7b9e1f4a6 \
+ConnectionStrings__DefaultConnection="Data Source=/opt/mydevsystem/data/app.db" \
 dotnet ef database update
-```
+# Confira no output quais migrations foram aplicadas — deve listar só as novas desde o
+# último deploy.
 
-Isso deve rodar só as 3 migrations novas (passo 16.1) — confirme no output que ele lista
-exatamente `RemoveMultiTenantAndWhitelist`, `AddOwnerUserIsolation` e
-`AddMediaAndAckToMessageLogs`, nada além disso. Se você preferir pular esse comando manual, tudo
-bem: a API aplica as mesmas migrations sozinha assim que subir (`Database.MigrateAsync()` no
-`Program.cs`) — o passo manual aqui serve só pra você ver o resultado antes de reiniciar o
-serviço de verdade.
+# 5. Compilar e publicar a API
+dotnet publish -c Release -o /opt/mydevsystem/publish/api
 
-### 16.5 Recompilar e reiniciar os 3 serviços
-
-```bash
-# API
-cd /opt/api_bot_whatsapp/ApiBotWhatsapp.Api
-dotnet publish -c Release -o /opt/api_bot_whatsapp/publish/api
-sudo systemctl restart api-bot-whatsapp   # ou o nome do seu serviço/processo
-
-# Bridge — a versão do whatsapp-web.js foi atualizada (1.34.6 -> 1.34.7) e há endpoints novos
-cd /opt/api_bot_whatsapp/whatsapp-bridge
-npm install
-pm2 restart whatsapp-bridge   # ou systemctl/o que você usa para manter o processo vivo
-
-# Frontend
-cd /opt/api_bot_whatsapp/frontend
+# 6. Buildar o Frontend
+cd /opt/mydevsystem/frontend
 npm install
 npm run build
-# copie dist/ para a pasta servida pelo Nginx, como no passo 7
+sudo rm -rf /var/www/mydevsystem/ui/*
+sudo cp -r dist/* /var/www/mydevsystem/ui/
+sudo chown -R www-data:www-data /var/www/mydevsystem/ui
+
+# 7. Atualizar o Bridge
+cd /opt/mydevsystem/whatsapp-bridge
+npm install
+
+# 8. Reiniciar tudo
+sudo systemctl start mydev_api mydev_bridge
+sudo systemctl restart nginx
 ```
 
-### 16.6 Efeitos colaterais esperados (uma vez só, neste deploy específico)
+### Verificação pós-deploy
 
-- **Reconectar o WhatsApp**: a sessão atual do bridge usa um id antigo (não o esquema
-  `user-{userId}` novo). Depois de subir, entre em `/whatsapp-connections` e reconecte via QR ou
-  pareamento por número. Depois disso, o cache de versão do WhatsApp Web (`webVersionCache`) evita
-  que isso se repita em deploys futuros.
-- **Todos os dados existentes (Contatos, Turmas, Regras, Mensagens) passam a pertencer ao
-  usuário `admin`** — é o comportamento combinado para essa migração de isolamento por usuário.
-- **Pasta de mídia nova**: `ApiBotWhatsapp.Api/wwwroot/uploads/` é criada automaticamente no
-  boot e servida como estático (`/uploads/...`) pela própria API. Se o Nginx só faz proxy de
-  `/api/` para a API, confirme que uma rota tipo `/uploads/` também é encaminhada, senão as
-  imagens enviadas/recebidas não aparecem no navegador.
+- `curl https://mydevsystem.site/health`
+- Login no painel funciona
+- `sudo systemctl status mydev_api mydev_bridge` — ambos `active (running)`
+- Testar a funcionalidade nova específica do deploy
+- Instruir os usuários a dar **Ctrl + F5** (hard reload) para pegar o novo `.js` do frontend
 
-### 16.7 Verificação pós-deploy
+## 5. Resolução de problemas
 
-- `GET /health` na API e no bridge.
-- Login funciona e mostra só os dados do usuário logado (teste com 2 contas se tiver).
-- Reconectar o WhatsApp em `/whatsapp-connections` e confirmar status "Conectado".
-- Mandar uma mensagem de teste de um número cadastrado em Contatos e confirmar no console da
-  API os logs `Webhook received:` / `Auto-reply decision:` (adicionados nesta sessão).
-- Enviar uma imagem pelo chat em `/messages` e confirmar que ela aparece na conversa (não só o
-  nome do arquivo) — valida a pasta `wwwroot/uploads/` e o proxy do Nginx.
-- Abrir `/documentacao`, escolher uma pessoa, marcar algumas datas e clicar em "Documentar" —
-  confirma que o histórico foi preservado pela migration.
+**Erro: "The current .NET SDK does not support targeting .NET X.X"**
+Causa: o `.csproj` veio do GitHub com uma versão de SDK superior à instalada no servidor. Não
+deveria mais acontecer — o servidor está no .NET 10, igual ao ambiente de desenvolvimento. Se
+voltar a acontecer (ex.: servidor reinstalado do zero e sem o SDK certo), o workaround
+histórico era baixar a versão alvo do projeto — mas prefira sempre instalar o SDK correto no
+servidor em vez de rebaixar o projeto:
+
+```bash
+cd /opt/mydevsystem/ApiBotWhatsapp.Api
+sed -i 's/net10.0/net8.0/g' ApiBotWhatsapp.Api.csproj
+sed -i 's/10.0.3/8.0.6/g' ApiBotWhatsapp.Api.csproj
+dotnet tool update --global dotnet-ef --version 8.0.6
+dotnet clean
+```
+
+**Erro: "Could not execute because the specified command or file was not found (dotnet-ef)"**
+Causa: a ferramenta do EF Core não está instalada no servidor, ou está numa versão muito
+diferente do pacote `Microsoft.EntityFrameworkCore.Design` do projeto. Isso já causou um bug
+real antes (uma migration com o corpo do `Up()`/`Down()` vazio, sem nenhum erro visível) —
+mantenha sempre as duas versões alinhadas:
+
+```bash
+dotnet tool update --global dotnet-ef --version 10.0.3
+```
+
+**Consultar logs de erro (emergência):**
+
+- API C#: `sudo journalctl -u mydev_api.service -f`
+- Bridge Node: `sudo journalctl -u mydev_bridge.service -f`
+- Portas ocupadas: `sudo ss -tulpn` (API = 5207, Bridge = 3001)
+
+## 6. Notas operacionais
+
+- **Banco**: `app.db` fica em `/opt/mydevsystem/data/`. O usuário do serviço `mydev_api`
+  precisa de permissão de leitura e escrita nessa pasta.
+- **Backup**: sempre antes de migrar (passo 3 do cheat sheet) — é o caminho de volta se algo
+  sair errado.
+- **Sessão do WhatsApp**: não apague `whatsapp-bridge/.wwebjs_auth/` — é onde fica salvo o
+  login do WhatsApp Web. Apagar força reconexão via QR code para todos os usuários.
+- **Cache do navegador**: depois de um deploy de frontend, oriente os usuários a dar Ctrl+F5.
+- **Tokens**: `WhatsApp__WebhookToken` (API) e `BACKEND_WEBHOOK_TOKEN` (Bridge) sempre
+  precisam ser idênticos.
+- **CORS**: qualquer domínio novo que sirva o frontend precisa ser adicionado em
+  `Cors__AllowedOrigins__N` no `.env` da API.

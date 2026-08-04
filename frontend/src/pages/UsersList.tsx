@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
 import type { UserListItem } from '../types'
+import { Badge } from '../components/UI'
+import '../styles/modern.css'
 import './UsersList.css'
 
 export function UsersList() {
   const [users, setUsers] = useState<UserListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const currentUsername = localStorage.getItem('bot_user')
 
   const loadUsers = async () => {
     try {
@@ -38,6 +41,31 @@ export function UsersList() {
     } catch (err) {
       console.error('Erro:', err)
       alert('Falha ao deletar usuário')
+    }
+  }
+
+  const handleToggleActive = async (user: UserListItem) => {
+    const nextActive = !user.isActive
+    if (nextActive === false && !confirm(`Desativar "${user.username}"? A sessão dele será encerrada imediatamente.`)) {
+      return
+    }
+
+    try {
+      await apiFetch(`/api/users/${user.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          username: user.username,
+          email: user.email,
+          phone: user.phone,
+          fullName: user.fullName,
+          isAdmin: user.isAdmin,
+          isActive: nextActive,
+        }),
+      })
+      setUsers(users.map(u => u.id === user.id ? { ...u, isActive: nextActive } : u))
+    } catch (err) {
+      console.error('Erro:', err)
+      alert(err instanceof Error ? err.message : 'Falha ao atualizar status do usuário')
     }
   }
 
@@ -76,6 +104,7 @@ export function UsersList() {
                 <th>Email</th>
                 <th>Telefone</th>
                 <th>Nome Completo</th>
+                <th>Status</th>
                 <th>Data de Cadastro</th>
                 <th>Ações</th>
               </tr>
@@ -87,6 +116,22 @@ export function UsersList() {
                   <td>{user.email || '-'}</td>
                   <td>{user.phone || '-'}</td>
                   <td>{user.fullName || '-'}</td>
+                  <td>
+                    <div className="status-cell">
+                      <Badge variant={user.isActive ? 'success' : 'danger'}>
+                        {user.isActive ? 'Ativo' : 'Inativo'}
+                      </Badge>
+                      <label className="toggle" title={user.username === currentUsername ? 'Não é possível desativar sua própria conta' : undefined}>
+                        <input
+                          type="checkbox"
+                          checked={!!user.isActive}
+                          disabled={user.username === currentUsername}
+                          onChange={() => handleToggleActive(user)}
+                        />
+                        <span className="toggle-slider"></span>
+                      </label>
+                    </div>
+                  </td>
                   <td>{formatBrazilTime(user.createdAtUtc)}</td>
                   <td className="actions">
                     <Link to={`/users/${user.id}/edit`} className="btn btn-sm btn-secondary">

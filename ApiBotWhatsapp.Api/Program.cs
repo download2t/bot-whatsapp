@@ -115,6 +115,36 @@ app.UseStaticFiles();
 app.UseCors("frontend");
 
 app.UseAuthentication();
+
+// Immediate account deactivation: without this, a JWT stays valid (and the user able to keep
+// using the app) until it naturally expires (up to Jwt:ExpiresMinutes) even right after an
+// admin deactivates the account (UsersController.Update). Only runs for requests that already
+// carry a valid JWT, so anonymous endpoints (health, login, webhook) pay no extra DB cost.
+app.Use(async (context, next) =>
+{
+    if (context.User.Identity?.IsAuthenticated == true)
+    {
+        var idClaim = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (int.TryParse(idClaim, out var userId))
+        {
+            var dbContext = context.RequestServices.GetRequiredService<AppDbContext>();
+            var isActive = await dbContext.Users
+                .Where(u => u.Id == userId)
+                .Select(u => (bool?)u.IsActive)
+                .FirstOrDefaultAsync();
+
+            if (isActive != true)
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await context.Response.WriteAsync("Conta desativada ou inexistente.");
+                return;
+            }
+        }
+    }
+
+    await next();
+});
+
 app.UseAuthorization();
 
 app.MapControllers();

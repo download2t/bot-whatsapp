@@ -66,6 +66,13 @@ public class AuthController(AppDbContext dbContext, JwtTokenService tokenService
             return Unauthorized("Invalid credentials.");
         }
 
+        // Checked only after the password is confirmed correct, so an anonymous caller
+        // guessing usernames can't use this to probe which accounts exist/are disabled.
+        if (!user.IsActive)
+        {
+            return Unauthorized("Conta desativada. Fale com o administrador.");
+        }
+
         var (token, expiresAtUtc) = tokenService.GenerateToken(user);
         return Ok(new LoginResponse(token, expiresAtUtc, user.Username, user.IsAdmin, user.Title));
     }
@@ -148,7 +155,7 @@ public class AuthController(AppDbContext dbContext, JwtTokenService tokenService
     }
 
     private static UserProfileResponse ToProfileResponse(User user) =>
-        new(user.Id, user.Username, user.IsAdmin, user.Email, user.Phone, user.Cpf, user.FullName, user.Title, user.Notes, user.CreatedAtUtc);
+        new(user.Id, user.Username, user.IsAdmin, user.IsActive, user.Email, user.Phone, user.Cpf, user.FullName, user.Title, user.Notes, user.CreatedAtUtc);
 
     private async Task<User?> GetCurrentUserAsync(CancellationToken cancellationToken)
     {

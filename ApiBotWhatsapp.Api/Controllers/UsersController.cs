@@ -1,6 +1,7 @@
 using ApiBotWhatsapp.Api.Data;
 using ApiBotWhatsapp.Api.Dtos;
 using ApiBotWhatsapp.Api.Models;
+using ApiBotWhatsapp.Api.Utils;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -31,7 +32,7 @@ public class UsersController(AppDbContext dbContext) : ControllerBase
 
         var users = await dbContext.Users
             .OrderByDescending(user => user.CreatedAtUtc)
-            .Select(user => new UserListResponse(user.Id, user.Username, user.IsAdmin, user.Email, user.Phone, user.FullName, user.CreatedAtUtc))
+            .Select(user => new UserListResponse(user.Id, user.Username, user.IsAdmin, user.IsActive, user.Email, user.Phone, user.FullName, user.CreatedAtUtc))
             .ToListAsync(cancellationToken);
 
         return Ok(users);
@@ -82,6 +83,7 @@ public class UsersController(AppDbContext dbContext) : ControllerBase
         var user = new User
         {
             IsAdmin = request.IsAdmin == true,
+            IsActive = request.IsActive ?? true,
             Username = username,
             Email = request.Email?.Trim(),
             Phone = request.Phone?.Trim(),
@@ -126,12 +128,20 @@ public class UsersController(AppDbContext dbContext) : ControllerBase
             return Conflict("Username already exists.");
         }
 
+        // Deactivation now takes effect immediately (see the auth middleware in Program.cs) —
+        // without this guard an admin could lock themselves out mid-edit.
+        if (id == this.GetCurrentUserId() && request.IsActive == false)
+        {
+            return BadRequest("Você não pode desativar sua própria conta.");
+        }
+
         user.Username = username;
         user.Email = request.Email?.Trim();
         user.Phone = request.Phone?.Trim();
         user.Cpf = request.Cpf?.Trim();
         user.FullName = request.FullName?.Trim();
         user.IsAdmin = request.IsAdmin == true;
+        user.IsActive = request.IsActive ?? user.IsActive;
         user.Title = request.Title?.Trim();
         user.Notes = request.Notes?.Trim();
         user.UpdatedAtUtc = DateTime.UtcNow;
@@ -162,5 +172,5 @@ public class UsersController(AppDbContext dbContext) : ControllerBase
     }
 
     private static UserProfileResponse ToProfileResponse(User user) =>
-        new(user.Id, user.Username, user.IsAdmin, user.Email, user.Phone, user.Cpf, user.FullName, user.Title, user.Notes, user.CreatedAtUtc);
+        new(user.Id, user.Username, user.IsAdmin, user.IsActive, user.Email, user.Phone, user.Cpf, user.FullName, user.Title, user.Notes, user.CreatedAtUtc);
 }
