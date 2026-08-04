@@ -6,6 +6,8 @@ export type LoginResponse = {
   userTitle: string | null
 }
 
+export type AudienceMode = 'RegisteredContacts' | 'Anyone' | 'AnyoneExceptRegistered' | 'AnyoneExceptTurma'
+
 export type ScheduleRule = {
   id: number
   name: string
@@ -18,6 +20,9 @@ export type ScheduleRule = {
   isOutOfBusinessHours: boolean
   maxDailyMessagesPerUser: number | null
   createdAtUtc: string
+  audienceMode: AudienceMode
+  excludedTurmaId: number | null
+  excludedTurmaName: string | null
 }
 
 export type ScheduleRuleWindow = {

@@ -104,8 +104,11 @@ public class AutoReplyService(
                 return new WhatsAppWebhookResponse(false, "Outgoing message logged. Auto reply skipped.", null);
             }
 
-            // Só respondemos automaticamente quem está cadastrado em Contatos do MESMO dono
-            // (qualquer turma). Quem não é um contato conhecido não participa da automação.
+            // Resolve se quem mandou a mensagem é um Contato conhecido do MESMO dono (qualquer
+            // turma) — não é mais um gate automático aqui; cada ScheduleRule decide, via
+            // AudienceMode, se aceita só contato cadastrado, qualquer um, ou qualquer um exceto
+            // cadastrado/exceto uma turma (ver IsAudienceEligible mais abaixo). matchedContact
+            // pode ficar null sem impedir resposta, dependendo da regra.
             // Compara pelos últimos dígitos (número local) em vez de string exata: absorve
             // diferenças de DDI (contato cadastrado sem "55", WhatsApp sempre manda com) e o
             // "9" extra do celular brasileiro, de forma genérica para qualquer país.
@@ -169,14 +172,6 @@ public class AutoReplyService(
                 }
             }
 
-            if (matchedContact is null)
-            {
-                logger.LogInformation(
-                    "Contact gate: Phone={Phone} (core={Core}) RawSenderId={RawSenderId} is not a registered contact for OwnerUserId={OwnerUserId}. Auto reply skipped.",
-                    normalizedPhone, phoneCore, request.RawSenderId, ownerUserId);
-                return new WhatsAppWebhookResponse(false, "Phone number is not a registered contact. Auto reply skipped.", null);
-            }
-
             if (isStale)
             {
                 return new WhatsAppWebhookResponse(false, $"Incoming message is older than {MaxIncomingMessageAge.TotalMinutes:0} minutes. Auto reply skipped.", null);
@@ -188,7 +183,7 @@ public class AutoReplyService(
                 .OrderBy(rule => rule.StartTime)
                 .ToListAsync(cancellationToken);
 
-            var rule = matchedRule.FirstOrDefault(item => IsRuleActive(currentTime, item));
+            var rule = matchedRule.FirstOrDefault(item => IsRuleActive(currentTime, item) && IsAudienceEligible(item, matchedContact));
             if (rule is null)
             {
                 return new WhatsAppWebhookResponse(false, "No active schedule rule for current time.", null);
@@ -277,6 +272,16 @@ public class AutoReplyService(
         // Normal logic: active WITHIN one of the configured windows for the current day
         return isWithinConfiguredWindow;
     }
+
+    // Per-rule audience gate — replaces what used to be a single global "must be a registered
+    // Contato" check before any rule was even considered. Each rule now picks its own audience.
+    private static bool IsAudienceEligible(ScheduleRule rule, Contato? matchedContact) => rule.AudienceMode switch
+    {
+        "Anyone" => true,
+        "AnyoneExceptRegistered" => matchedContact is null,
+        "AnyoneExceptTurma" => matchedContact is null || matchedContact.TurmaId != rule.ExcludedTurmaId,
+        _ => matchedContact is not null, // "RegisteredContacts" (default/legacy fallback)
+    };
 
     private static bool IsWithinRange(TimeSpan now, TimeSpan start, TimeSpan end)
     {

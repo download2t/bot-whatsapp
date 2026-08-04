@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
-import type { Pais, ScheduleRule } from '../types'
+import type { AudienceMode, Pais, ScheduleRule, Turma } from '../types'
 import './ScheduleRules.css'
+
+const AUDIENCE_OPTIONS: { value: AudienceMode; label: string; hint: string }[] = [
+  { value: 'RegisteredContacts', label: 'Somente contatos cadastrados', hint: 'Comportamento padrão — só responde quem está em Contatos.' },
+  { value: 'Anyone', label: 'Qualquer pessoa', hint: 'Responde qualquer número que mandar mensagem, cadastrado ou não.' },
+  { value: 'AnyoneExceptRegistered', label: 'Qualquer pessoa, exceto contatos cadastrados', hint: 'Útil pra separar automação de gente que já é atendida manualmente.' },
+  { value: 'AnyoneExceptTurma', label: 'Qualquer pessoa, exceto uma turma específica', hint: 'Escolha abaixo qual turma fica de fora da automação.' },
+]
 
 type WindowForm = {
   dayOfWeek: number
@@ -25,6 +32,8 @@ type FormData = {
   throttleMinutes: number
   isOutOfBusinessHours: boolean
   maxDailyMessagesPerUser: number | null
+  audienceMode: AudienceMode
+  excludedTurmaId: number | null
 }
 
 const DAY_OPTIONS = [
@@ -53,8 +62,11 @@ export function ScheduleRuleForm() {
     throttleMinutes: 0,
     isOutOfBusinessHours: false,
     maxDailyMessagesPerUser: null,
+    audienceMode: 'RegisteredContacts',
+    excludedTurmaId: null,
   })
   const [paises, setPaises] = useState<Pais[]>([])
+  const [turmas, setTurmas] = useState<Turma[]>([])
   const [activeTab, setActiveTab] = useState<number | null>(null)
 
   useEffect(() => {
@@ -64,6 +76,15 @@ export function ScheduleRuleForm() {
         setPaises((data || []).filter(p => p.isActive))
       } catch {
         // Não impede o formulário de funcionar só com mensagens padrão
+      }
+    })()
+
+    void (async () => {
+      try {
+        const data = await apiFetch<Turma[]>('/api/turmas')
+        setTurmas((data || []).filter(t => t.isActive))
+      } catch {
+        // Não impede o formulário de funcionar sem a opção de excluir turma
       }
     })()
   }, [])
@@ -93,6 +114,8 @@ export function ScheduleRuleForm() {
         throttleMinutes: rule.throttleMinutes,
         isOutOfBusinessHours: rule.isOutOfBusinessHours,
         maxDailyMessagesPerUser: rule.maxDailyMessagesPerUser,
+        audienceMode: rule.audienceMode ?? 'RegisteredContacts',
+        excludedTurmaId: rule.excludedTurmaId,
       })
       setError(null)
     } catch (err) {
@@ -240,6 +263,12 @@ export function ScheduleRuleForm() {
       return
     }
 
+    if (form.audienceMode === 'AnyoneExceptTurma' && !form.excludedTurmaId) {
+      setError('Escolha qual turma fica de fora quando o público-alvo é "exceto uma turma específica"')
+      setSubmitting(false)
+      return
+    }
+
     const firstRange = getRangesForDay(form.windows[0]?.dayOfWeek ?? 1)[0] || DEFAULT_RANGE
 
     const payload = {
@@ -252,6 +281,8 @@ export function ScheduleRuleForm() {
       throttleMinutes: form.throttleMinutes,
       isOutOfBusinessHours: form.isOutOfBusinessHours,
       maxDailyMessagesPerUser: form.maxDailyMessagesPerUser,
+      audienceMode: form.audienceMode,
+      excludedTurmaId: form.audienceMode === 'AnyoneExceptTurma' ? form.excludedTurmaId : null,
     }
 
     try {
@@ -335,6 +366,53 @@ export function ScheduleRuleForm() {
               />
             </div>
           </div>
+        </fieldset>
+
+        <fieldset className="form-section">
+          <legend>🎯 Público-alvo</legend>
+          <small className="messages-hint">
+            Quem pode receber resposta automática por esta regra.
+          </small>
+
+          <div className="audience-options">
+            {AUDIENCE_OPTIONS.map(option => (
+              <label key={option.value} className={`audience-option ${form.audienceMode === option.value ? 'active' : ''}`}>
+                <input
+                  type="radio"
+                  name="audienceMode"
+                  value={option.value}
+                  checked={form.audienceMode === option.value}
+                  onChange={() => setForm(prev => ({ ...prev, audienceMode: option.value }))}
+                  disabled={submitting}
+                />
+                <div>
+                  <strong>{option.label}</strong>
+                  <small>{option.hint}</small>
+                </div>
+              </label>
+            ))}
+          </div>
+
+          {form.audienceMode === 'AnyoneExceptTurma' && (
+            <div className="form-group" style={{ marginTop: '12px' }}>
+              <label>Turma a excluir</label>
+              <select
+                value={form.excludedTurmaId ?? ''}
+                onChange={(e) => setForm(prev => ({ ...prev, excludedTurmaId: e.target.value ? Number(e.target.value) : null }))}
+                disabled={submitting}
+              >
+                <option value="">— Selecione uma turma —</option>
+                {turmas.map(turma => (
+                  <option key={turma.id} value={turma.id}>{turma.name}</option>
+                ))}
+              </select>
+              {turmas.length === 0 && (
+                <small style={{ display: 'block', marginTop: '4px', color: '#888' }}>
+                  Nenhuma turma ativa cadastrada — crie uma em <Link to="/turmas">Turmas</Link>.
+                </small>
+              )}
+            </div>
+          )}
         </fieldset>
 
         <div className="schedule-columns">

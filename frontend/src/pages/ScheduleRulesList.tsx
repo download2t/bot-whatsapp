@@ -45,6 +45,17 @@ function getCoveredPaisNames(rule: ScheduleRule): string[] {
   return Array.from(names)
 }
 
+// null quando é o padrão ("RegisteredContacts") — só mostra o badge quando a regra
+// realmente desvia do comportamento usual, pra não poluir todo card com a mesma info.
+function getAudienceLabel(rule: ScheduleRule): string | null {
+  switch (rule.audienceMode) {
+    case 'Anyone': return '👥 Qualquer pessoa'
+    case 'AnyoneExceptRegistered': return '👥 Qualquer um, exceto cadastrados'
+    case 'AnyoneExceptTurma': return `👥 Exceto turma "${rule.excludedTurmaName ?? '?'}"`
+    default: return null
+  }
+}
+
 export function ScheduleRulesList() {
   const [rules, setRules] = useState<ScheduleRule[]>([])
   const [loading, setLoading] = useState(true)
@@ -96,7 +107,9 @@ export function ScheduleRulesList() {
           isEnabled: updated.isEnabled,
           throttleMinutes: updated.throttleMinutes,
           isOutOfBusinessHours: updated.isOutOfBusinessHours,
-          maxDailyMessagesPerUser: updated.maxDailyMessagesPerUser
+          maxDailyMessagesPerUser: updated.maxDailyMessagesPerUser,
+          audienceMode: updated.audienceMode,
+          excludedTurmaId: updated.excludedTurmaId
         })
       })
       setRules(rules.map(r => r.id === rule.id ? updated : r))
@@ -166,6 +179,9 @@ export function ScheduleRulesList() {
               </div>
 
               <div className="rule-config">
+                {getAudienceLabel(rule) && (
+                  <span className="config-badge">{getAudienceLabel(rule)}</span>
+                )}
                 {rule.throttleMinutes > 0 && (
                   <span className="config-badge">⏱️ {rule.throttleMinutes}min throttle</span>
                 )}

@@ -1056,6 +1056,56 @@
   cursor: pointer;
 }
 
+/* ===== PÚBLICO-ALVO ===== */
+.audience-options {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.audience-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 10px;
+  padding: 0.7rem 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: white;
+}
+
+.audience-option:hover {
+  border-color: #b7c0ec;
+}
+
+.audience-option.active {
+  border-color: #667eea;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.10), rgba(124, 58, 237, 0.06));
+}
+
+.audience-option input[type="radio"] {
+  margin-top: 3px;
+  width: 16px;
+  height: 16px;
+  accent-color: #667eea;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.audience-option strong {
+  display: block;
+  color: #1a1a2e;
+  font-size: 0.9rem;
+}
+
+.audience-option small {
+  display: block;
+  color: #888;
+  font-size: 0.8rem;
+  margin-top: 0.15rem;
+}
+
 /* ===== ABAS PADRÃO / PAÍSES ===== */
 .pais-tabs {
   display: flex;

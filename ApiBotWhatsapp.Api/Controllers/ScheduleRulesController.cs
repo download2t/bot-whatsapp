@@ -209,6 +209,48 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
             .ToDictionaryAsync(p => p.Id, cancellationToken);
     }
 
+    private async Task<Dictionary<int, Turma>> GetOwnerTurmasAsync(int ownerUserId, CancellationToken cancellationToken)
+    {
+        return await dbContext.Turmas
+            .Where(t => t.OwnerUserId == ownerUserId)
+            .ToDictionaryAsync(t => t.Id, cancellationToken);
+    }
+
+    private static readonly HashSet<string> ValidAudienceModes =
+        ["RegisteredContacts", "Anyone", "AnyoneExceptRegistered", "AnyoneExceptTurma"];
+
+    private static bool TryNormalizeAudience(
+        string? audienceMode,
+        int? excludedTurmaId,
+        IReadOnlySet<int> validTurmaIds,
+        out string normalizedAudienceMode,
+        out int? normalizedExcludedTurmaId,
+        out string? error)
+    {
+        normalizedAudienceMode = string.IsNullOrWhiteSpace(audienceMode) ? "RegisteredContacts" : audienceMode.Trim();
+        normalizedExcludedTurmaId = null;
+        error = null;
+
+        if (!ValidAudienceModes.Contains(normalizedAudienceMode))
+        {
+            error = $"Invalid AudienceMode: {audienceMode}.";
+            return false;
+        }
+
+        if (normalizedAudienceMode == "AnyoneExceptTurma")
+        {
+            if (excludedTurmaId is null || !validTurmaIds.Contains(excludedTurmaId.Value))
+            {
+                error = "ExcludedTurmaId is required and must belong to the owner when AudienceMode is AnyoneExceptTurma.";
+                return false;
+            }
+
+            normalizedExcludedTurmaId = excludedTurmaId;
+        }
+
+        return true;
+    }
+
     [HttpGet]
     public async Task<ActionResult<IEnumerable<ScheduleRuleResponse>>> GetAll(CancellationToken cancellationToken)
     {
@@ -220,7 +262,8 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
             .ToListAsync(cancellationToken);
 
         var paisById = await GetOwnerPaisesAsync(ownerUserId, cancellationToken);
-        var responses = BuildResponses(rules, paisById);
+        var turmaById = await GetOwnerTurmasAsync(ownerUserId, cancellationToken);
+        var responses = BuildResponses(rules, paisById, turmaById);
 
         return Ok(responses);
     }
@@ -237,7 +280,8 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
         }
 
         var paisById = await GetOwnerPaisesAsync(ownerUserId, cancellationToken);
-        return Ok(BuildResponses([rule], paisById)[0]);
+        var turmaById = await GetOwnerTurmasAsync(ownerUserId, cancellationToken);
+        return Ok(BuildResponses([rule], paisById, turmaById)[0]);
     }
 
     [HttpPost]
@@ -256,6 +300,12 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
             return BadRequest(messageError);
         }
 
+        var turmaById = await GetOwnerTurmasAsync(ownerUserId, cancellationToken);
+        if (!TryNormalizeAudience(request.AudienceMode, request.ExcludedTurmaId, turmaById.Keys.ToHashSet(), out var normalizedAudienceMode, out var normalizedExcludedTurmaId, out var audienceError))
+        {
+            return BadRequest(audienceError);
+        }
+
         var rule = new ScheduleRule
         {
             OwnerUserId = ownerUserId,
@@ -268,13 +318,15 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
             ThrottleMinutes = request.ThrottleMinutes,
             IsOutOfBusinessHours = request.IsOutOfBusinessHours,
             MaxDailyMessagesPerUser = request.MaxDailyMessagesPerUser,
+            AudienceMode = normalizedAudienceMode,
+            ExcludedTurmaId = normalizedExcludedTurmaId,
             CreatedAtUtc = DateTime.UtcNow
         };
 
         dbContext.ScheduleRules.Add(rule);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return CreatedAtAction(nameof(GetById), new { id = rule.Id }, BuildResponses([rule], paisById)[0]);
+        return CreatedAtAction(nameof(GetById), new { id = rule.Id }, BuildResponses([rule], paisById, turmaById)[0]);
     }
 
     [HttpPut("{id:int}")]
@@ -299,6 +351,12 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
             return BadRequest(messageError);
         }
 
+        var turmaById = await GetOwnerTurmasAsync(ownerUserId, cancellationToken);
+        if (!TryNormalizeAudience(request.AudienceMode, request.ExcludedTurmaId, turmaById.Keys.ToHashSet(), out var normalizedAudienceMode, out var normalizedExcludedTurmaId, out var audienceError))
+        {
+            return BadRequest(audienceError);
+        }
+
         rule.Name = request.Name.Trim();
         rule.StartTime = TimeSpan.ParseExact(normalizedWindows[0].StartTime, @"hh\:mm", CultureInfo.InvariantCulture);
         rule.EndTime = TimeSpan.ParseExact(normalizedWindows[0].EndTime, @"hh\:mm", CultureInfo.InvariantCulture);
@@ -308,9 +366,11 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
         rule.ThrottleMinutes = request.ThrottleMinutes;
         rule.IsOutOfBusinessHours = request.IsOutOfBusinessHours;
         rule.MaxDailyMessagesPerUser = request.MaxDailyMessagesPerUser;
+        rule.AudienceMode = normalizedAudienceMode;
+        rule.ExcludedTurmaId = normalizedExcludedTurmaId;
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        return Ok(BuildResponses([rule], paisById)[0]);
+        return Ok(BuildResponses([rule], paisById, turmaById)[0]);
     }
 
     [HttpDelete("{id:int}")]
@@ -329,7 +389,7 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
         return NoContent();
     }
 
-    private static List<ScheduleRuleResponse> BuildResponses(List<ScheduleRule> rules, Dictionary<int, Pais> paisById)
+    private static List<ScheduleRuleResponse> BuildResponses(List<ScheduleRule> rules, Dictionary<int, Pais> paisById, Dictionary<int, Turma> turmaById)
     {
         var responses = new List<ScheduleRuleResponse>(rules.Count);
         foreach (var rule in rules)
@@ -356,6 +416,10 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
                 })
                 .ToList();
 
+            var excludedTurmaName = rule.ExcludedTurmaId is not null && turmaById.TryGetValue(rule.ExcludedTurmaId.Value, out var foundTurma)
+                ? foundTurma.Name
+                : null;
+
             responses.Add(new ScheduleRuleResponse(
                 rule.Id,
                 rule.Name,
@@ -367,7 +431,10 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
                 rule.IsOutOfBusinessHours,
                 rule.MaxDailyMessagesPerUser,
                 rule.CreatedAtUtc,
-                windows));
+                windows,
+                rule.AudienceMode,
+                rule.ExcludedTurmaId,
+                excludedTurmaName));
         }
 
         return responses;

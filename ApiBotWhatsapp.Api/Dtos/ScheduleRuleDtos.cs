@@ -23,7 +23,9 @@ public record ScheduleRuleRequest(
     int ThrottleMinutes = 0,
     bool IsOutOfBusinessHours = false,
     int? MaxDailyMessagesPerUser = null,
-    IReadOnlyList<ScheduleRuleTimeWindowRequest>? Windows = null);
+    IReadOnlyList<ScheduleRuleTimeWindowRequest>? Windows = null,
+    string AudienceMode = "RegisteredContacts",
+    int? ExcludedTurmaId = null);
 
 public record ScheduleRuleResponse(
     int Id,
@@ -36,4 +38,7 @@ public record ScheduleRuleResponse(
     bool IsOutOfBusinessHours,
     int? MaxDailyMessagesPerUser,
     DateTime CreatedAtUtc,
-    IReadOnlyList<ScheduleRuleTimeWindowResponse> Windows);
+    IReadOnlyList<ScheduleRuleTimeWindowResponse> Windows,
+    string AudienceMode,
+    int? ExcludedTurmaId,
+    string? ExcludedTurmaName);

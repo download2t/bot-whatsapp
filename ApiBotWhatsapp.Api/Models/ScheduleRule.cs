@@ -33,5 +33,14 @@ public class ScheduleRule
     // Maximum daily messages per user for this rule
     public int? MaxDailyMessagesPerUser { get; set; } = null;
 
+    // Who this rule can reply to: "RegisteredContacts" (default, current behavior) |
+    // "Anyone" | "AnyoneExceptRegistered" | "AnyoneExceptTurma" (needs ExcludedTurmaId).
+    [Required]
+    [MaxLength(30)]
+    public string AudienceMode { get; set; } = "RegisteredContacts";
+
+    // Only meaningful when AudienceMode == "AnyoneExceptTurma".
+    public int? ExcludedTurmaId { get; set; }
+
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 }
