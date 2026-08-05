@@ -13,6 +13,8 @@ import { ContatoForm } from './pages/ContatoForm'
 import { ContatosImportExcel } from './pages/ContatosImportExcel'
 import { PaisesList } from './pages/PaisesList'
 import { PaisForm } from './pages/PaisForm'
+import { ChatFlowsList } from './pages/ChatFlowsList'
+import { ChatFlowForm } from './pages/ChatFlowForm'
 import { BulkMessages } from './pages/BulkMessages'
 import { BulkCampaignDetail } from './pages/BulkCampaignDetail'
 import { BulkCampaignHistory } from './pages/BulkCampaignHistory'
@@ -98,6 +100,9 @@ export default function App() {
         <Route path="/paises" element={<PaisesList />} />
         <Route path="/paises/new" element={<PaisForm />} />
         <Route path="/paises/:id/edit" element={<PaisForm />} />
+        <Route path="/chatbot" element={<ChatFlowsList />} />
+        <Route path="/chatbot/new" element={<ChatFlowForm />} />
+        <Route path="/chatbot/:id/edit" element={<ChatFlowForm />} />
         <Route path="/rules" element={<ScheduleRulesList />} />
         <Route path="/rules/new" element={<ScheduleRuleForm />} />
         <Route path="/rules/edit/:id" element={<ScheduleRuleForm />} />

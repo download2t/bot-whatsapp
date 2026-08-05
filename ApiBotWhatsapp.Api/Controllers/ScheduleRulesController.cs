@@ -134,6 +134,7 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
     private static bool TryNormalizeMessages(
         IReadOnlyList<ScheduleRuleMessageRequest>? messages,
         IReadOnlySet<int> validPaisIds,
+        IReadOnlySet<int> validChatFlowIds,
         out List<ScheduleRuleMessageRequest> normalized,
         out string? error)
     {
@@ -148,8 +149,11 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
 
         foreach (var message in messages)
         {
-            var text = message.Text?.Trim();
-            if (string.IsNullOrWhiteSpace(text))
+            var text = message.Text?.Trim() ?? string.Empty;
+
+            // A message pointing at a chat flow doesn't send Text at all (the flow's own start
+            // step message is what actually goes out) — Text is only required in plain-text mode.
+            if (message.ChatFlowId is null && string.IsNullOrWhiteSpace(text))
             {
                 error = "Every message must have a non-empty text.";
                 return false;
@@ -173,7 +177,13 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
                 return false;
             }
 
-            normalized.Add(new ScheduleRuleMessageRequest(text, days, message.PaisId));
+            if (message.ChatFlowId is not null && !validChatFlowIds.Contains(message.ChatFlowId.Value))
+            {
+                error = $"Invalid ChatFlowId: {message.ChatFlowId}.";
+                return false;
+            }
+
+            normalized.Add(new ScheduleRuleMessageRequest(text, days, message.PaisId, message.ChatFlowId));
         }
 
         return true;
@@ -214,6 +224,13 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
         return await dbContext.Turmas
             .Where(t => t.OwnerUserId == ownerUserId)
             .ToDictionaryAsync(t => t.Id, cancellationToken);
+    }
+
+    private async Task<Dictionary<int, ChatFlow>> GetOwnerChatFlowsAsync(int ownerUserId, CancellationToken cancellationToken)
+    {
+        return await dbContext.ChatFlows
+            .Where(f => f.OwnerUserId == ownerUserId)
+            .ToDictionaryAsync(f => f.Id, cancellationToken);
     }
 
     private static readonly HashSet<string> ValidAudienceModes =
@@ -263,7 +280,8 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
 
         var paisById = await GetOwnerPaisesAsync(ownerUserId, cancellationToken);
         var turmaById = await GetOwnerTurmasAsync(ownerUserId, cancellationToken);
-        var responses = BuildResponses(rules, paisById, turmaById);
+        var chatFlowById = await GetOwnerChatFlowsAsync(ownerUserId, cancellationToken);
+        var responses = BuildResponses(rules, paisById, turmaById, chatFlowById);
 
         return Ok(responses);
     }
@@ -281,7 +299,8 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
 
         var paisById = await GetOwnerPaisesAsync(ownerUserId, cancellationToken);
         var turmaById = await GetOwnerTurmasAsync(ownerUserId, cancellationToken);
-        return Ok(BuildResponses([rule], paisById, turmaById)[0]);
+        var chatFlowById = await GetOwnerChatFlowsAsync(ownerUserId, cancellationToken);
+        return Ok(BuildResponses([rule], paisById, turmaById, chatFlowById)[0]);
     }
 
     [HttpPost]
@@ -295,7 +314,8 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
         }
 
         var paisById = await GetOwnerPaisesAsync(ownerUserId, cancellationToken);
-        if (!TryNormalizeMessages(request.Messages, paisById.Keys.ToHashSet(), out var normalizedMessages, out var messageError))
+        var chatFlowById = await GetOwnerChatFlowsAsync(ownerUserId, cancellationToken);
+        if (!TryNormalizeMessages(request.Messages, paisById.Keys.ToHashSet(), chatFlowById.Keys.ToHashSet(), out var normalizedMessages, out var messageError))
         {
             return BadRequest(messageError);
         }
@@ -326,7 +346,7 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
         dbContext.ScheduleRules.Add(rule);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return CreatedAtAction(nameof(GetById), new { id = rule.Id }, BuildResponses([rule], paisById, turmaById)[0]);
+        return CreatedAtAction(nameof(GetById), new { id = rule.Id }, BuildResponses([rule], paisById, turmaById, chatFlowById)[0]);
     }
 
     [HttpPut("{id:int}")]
@@ -346,7 +366,8 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
         }
 
         var paisById = await GetOwnerPaisesAsync(ownerUserId, cancellationToken);
-        if (!TryNormalizeMessages(request.Messages, paisById.Keys.ToHashSet(), out var normalizedMessages, out var messageError))
+        var chatFlowById = await GetOwnerChatFlowsAsync(ownerUserId, cancellationToken);
+        if (!TryNormalizeMessages(request.Messages, paisById.Keys.ToHashSet(), chatFlowById.Keys.ToHashSet(), out var normalizedMessages, out var messageError))
         {
             return BadRequest(messageError);
         }
@@ -370,7 +391,7 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
         rule.ExcludedTurmaId = normalizedExcludedTurmaId;
 
         await dbContext.SaveChangesAsync(cancellationToken);
-        return Ok(BuildResponses([rule], paisById, turmaById)[0]);
+        return Ok(BuildResponses([rule], paisById, turmaById, chatFlowById)[0]);
     }
 
     [HttpDelete("{id:int}")]
@@ -389,7 +410,7 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
         return NoContent();
     }
 
-    private static List<ScheduleRuleResponse> BuildResponses(List<ScheduleRule> rules, Dictionary<int, Pais> paisById, Dictionary<int, Turma> turmaById)
+    private static List<ScheduleRuleResponse> BuildResponses(List<ScheduleRule> rules, Dictionary<int, Pais> paisById, Dictionary<int, Turma> turmaById, Dictionary<int, ChatFlow> chatFlowById)
     {
         var responses = new List<ScheduleRuleResponse>(rules.Count);
         foreach (var rule in rules)
@@ -405,14 +426,17 @@ public class ScheduleRulesController(AppDbContext dbContext) : ControllerBase
             var messages = GetRuleMessages(rule)
                 .Select(message =>
                 {
-                    var pais = message.PaisId is not null && paisById.TryGetValue(message.PaisId.Value, out var found) ? found : null;
+                    var pais = message.PaisId is not null && paisById.TryGetValue(message.PaisId.Value, out var foundPais) ? foundPais : null;
+                    var chatFlow = message.ChatFlowId is not null && chatFlowById.TryGetValue(message.ChatFlowId.Value, out var foundFlow) ? foundFlow : null;
                     return new ScheduleRuleMessageResponse(
                         message.Text,
                         message.Days,
                         message.Days.Select(GetDayName).ToList(),
                         message.PaisId,
                         pais?.Name,
-                        pais?.Ddi);
+                        pais?.Ddi,
+                        message.ChatFlowId,
+                        chatFlow?.Name);
                 })
                 .ToList();
 

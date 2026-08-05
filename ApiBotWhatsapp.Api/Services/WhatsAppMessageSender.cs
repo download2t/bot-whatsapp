@@ -6,7 +6,7 @@ namespace ApiBotWhatsapp.Api.Services;
 public class WhatsAppMessageSender(IConfiguration configuration, IHttpClientFactory httpClientFactory, WhatsAppBridgeClient bridgeClient)
 {
 
-    public async Task<(bool Success, string Status, string? MessageId)> SendMessageAsync(
+    public async Task<(bool Success, string Status, string? MessageId, bool UnreadApplied)> SendMessageAsync(
         string phoneNumber,
         string message,
         bool markAsUnread,
@@ -19,7 +19,7 @@ public class WhatsAppMessageSender(IConfiguration configuration, IHttpClientFact
         var candidates = PhoneNumberUtils.GetEquivalentBrazilianNumbers(phoneNumber);
         if (candidates.Length == 0)
         {
-            return (false, "Phone number is invalid.", null);
+            return (false, "Phone number is invalid.", null, false);
         }
 
         var bridgeBaseUrl = configuration["WhatsApp:BridgeBaseUrl"];
@@ -43,7 +43,7 @@ public class WhatsAppMessageSender(IConfiguration configuration, IHttpClientFact
         var outgoingWebhookUrl = configuration["WhatsApp:OutgoingWebhookUrl"];
         if (string.IsNullOrWhiteSpace(outgoingWebhookUrl))
         {
-            return (true, "Simulated send (configure WhatsApp:OutgoingWebhookUrl for real dispatch).", null);
+            return (true, "Simulated send (configure WhatsApp:OutgoingWebhookUrl for real dispatch).", null, false);
         }
 
         foreach (var candidate in candidates)
@@ -63,24 +63,24 @@ public class WhatsAppMessageSender(IConfiguration configuration, IHttpClientFact
 
                 if (response.IsSuccessStatusCode)
                 {
-                    return (true, "Sent to WhatsApp provider.", null);
+                    return (true, "Sent to WhatsApp provider.", null, false);
                 }
 
                 var body = await response.Content.ReadAsStringAsync(cancellationToken);
                 if (candidate == candidates[^1])
                 {
-                    return (false, string.IsNullOrWhiteSpace(body) ? $"Provider returned {(int)response.StatusCode}." : body, null);
+                    return (false, string.IsNullOrWhiteSpace(body) ? $"Provider returned {(int)response.StatusCode}." : body, null, false);
                 }
             }
             catch (Exception ex)
             {
                 if (candidate == candidates[^1])
                 {
-                    return (false, $"Provider call failed: {ex.Message}", null);
+                    return (false, $"Provider call failed: {ex.Message}", null, false);
                 }
             }
         }
 
-        return (false, "Unable to send message using available phone variants.", null);
+        return (false, "Unable to send message using available phone variants.", null, false);
     }
 }

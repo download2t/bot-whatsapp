@@ -32,6 +32,8 @@ builder.Services.AddScoped<AutoReplyService>();
 builder.Services.AddScoped<WhatsAppMessageSender>();
 builder.Services.AddScoped<WhatsAppBridgeClient>();
 builder.Services.AddScoped<MediaStorageService>();
+builder.Services.AddScoped<ChatFlowService>();
+builder.Services.AddScoped<ConversationInboxService>();
 builder.Services.AddSingleton<BulkCampaignRunner>();
 
 var jwtSection = builder.Configuration.GetSection("Jwt");

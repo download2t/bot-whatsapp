@@ -1156,6 +1156,114 @@
   background: rgba(102, 126, 234, 0.25);
 }
 
+/* ===== EDITOR DE FLUXO DE CHATBOT: SIDEBAR DE ETAPAS ===== */
+.flow-editor-layout {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.75rem;
+  align-items: flex-start;
+}
+
+.flow-steps-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 260px;
+  flex-shrink: 0;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.flow-step-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 10px;
+  background: white;
+  color: #444;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.flow-step-tab:hover {
+  border-color: #b7c0ec;
+}
+
+.flow-step-tab.active {
+  border-color: #667eea;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.14), rgba(124, 58, 237, 0.10));
+  color: #3d3d92;
+  font-weight: 700;
+}
+
+.flow-step-tab-title {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-step-tab-badges {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.flow-step-badge {
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: #eee;
+  color: #666;
+}
+
+.flow-step-badge.start {
+  background: rgba(37, 211, 102, 0.18);
+  color: #1a7a3e;
+}
+
+.flow-step-badge.end {
+  background: rgba(220, 38, 38, 0.12);
+  color: #b91c1c;
+}
+
+.flow-add-step-btn {
+  margin-top: 0.25rem;
+  width: 100%;
+}
+
+.flow-step-panel {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  padding: 1rem;
+}
+
+@media (max-width: 768px) {
+  .flow-editor-layout {
+    flex-direction: column;
+  }
+
+  .flow-steps-sidebar {
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 100%;
+    max-height: 200px;
+  }
+
+  .flow-step-tab {
+    flex: 1 1 auto;
+    min-width: 140px;
+  }
+}
+
 /* ===== MENSAGENS POR DIA ===== */
 .day-coverage {
   display: flex;

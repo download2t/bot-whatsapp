@@ -99,7 +99,7 @@ public class BulkCampaignRunner(IServiceScopeFactory scopeFactory)
                 var personalized = $"{campaign.Greeting} {item.ContactName}!\n{campaign.MessageTemplate}";
                 var normalizedPhone = PhoneNumberUtils.Normalize(item.PhoneNumber);
 
-                (bool Success, string Status, string? MessageId) result;
+                (bool Success, string Status, string? MessageId, bool UnreadApplied) result;
                 try
                 {
                     // Intentionally CancellationToken.None: once a send is in flight we let it
@@ -117,7 +117,7 @@ public class BulkCampaignRunner(IServiceScopeFactory scopeFactory)
                 }
                 catch (Exception ex)
                 {
-                    result = (false, $"Erro interno: {ex.Message}", null);
+                    result = (false, $"Erro interno: {ex.Message}", null, false);
                 }
 
                 item.Status = result.Success ? "Sent" : "Failed";
@@ -128,6 +128,16 @@ public class BulkCampaignRunner(IServiceScopeFactory scopeFactory)
                 if (result.Success)
                 {
                     campaign.SentCount++;
+
+                    // Same reasoning as the individual send endpoint: a manual message to this
+                    // contact means a human is now handling it, so drop any in-progress chat-flow
+                    // conversation instead of leaving it to misinterpret whatever they say next.
+                    var activeConversation = await dbContext.ChatFlowConversations
+                        .FirstOrDefaultAsync(c => c.OwnerUserId == campaign.OwnerUserId && c.PhoneNumber == normalizedPhone);
+                    if (activeConversation is not null)
+                    {
+                        dbContext.ChatFlowConversations.Remove(activeConversation);
+                    }
                 }
                 else
                 {

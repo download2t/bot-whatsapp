@@ -1,5 +1,6 @@
 using ApiBotWhatsapp.Api.Data;
 using ApiBotWhatsapp.Api.Dtos;
+using ApiBotWhatsapp.Api.Services;
 using ApiBotWhatsapp.Api.Utils;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -9,8 +10,30 @@ namespace ApiBotWhatsapp.Api.Controllers;
 
 [ApiController]
 [Route("api/messages")]
-public class MessageLogsController(AppDbContext dbContext) : ControllerBase
+public class MessageLogsController(AppDbContext dbContext, ConversationInboxService conversationInbox) : ControllerBase
 {
+    // Phone numbers whose conversation had an automatic message (rule text or chat-flow step)
+    // sent since the operator last opened it in /messages — drives the "não lida" badge in the
+    // sidebar. Unrelated to WhatsApp's own read receipts.
+    [HttpGet("pending-review")]
+    public async Task<ActionResult<IEnumerable<string>>> GetPendingReview(CancellationToken cancellationToken)
+    {
+        var phones = await conversationInbox.GetPendingReviewPhonesAsync(this.GetCurrentUserId(), cancellationToken);
+        return Ok(phones);
+    }
+
+    [HttpPost("mark-read")]
+    public async Task<ActionResult> MarkRead([FromBody] MarkConversationReadRequest request, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.PhoneNumber))
+        {
+            return BadRequest("PhoneNumber is required.");
+        }
+
+        await conversationInbox.MarkReadAsync(this.GetCurrentUserId(), request.PhoneNumber, cancellationToken);
+        return NoContent();
+    }
+
     [HttpGet]
     public async Task<ActionResult<IEnumerable<MessageLogResponse>>> GetRecent([FromQuery] int take = 100, CancellationToken cancellationToken = default)
     {

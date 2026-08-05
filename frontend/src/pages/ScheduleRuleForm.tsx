@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
-import type { AudienceMode, Pais, ScheduleRule, Turma } from '../types'
+import type { AudienceMode, ChatFlowListItem, Pais, ScheduleRule, Turma } from '../types'
 import './ScheduleRules.css'
 
 const AUDIENCE_OPTIONS: { value: AudienceMode; label: string; hint: string }[] = [
@@ -22,6 +22,7 @@ type MessageForm = {
   days: number[]
   paisId: number | null
   paisName: string | null
+  chatFlowId: number | null
 }
 
 type FormData = {
@@ -57,7 +58,7 @@ export function ScheduleRuleForm() {
   const [form, setForm] = useState<FormData>({
     name: '',
     windows: [{ dayOfWeek: 1, ...DEFAULT_RANGE }, { dayOfWeek: 2, ...DEFAULT_RANGE }, { dayOfWeek: 3, ...DEFAULT_RANGE }, { dayOfWeek: 4, ...DEFAULT_RANGE }, { dayOfWeek: 5, ...DEFAULT_RANGE }],
-    messages: [{ text: '', days: [], paisId: null, paisName: null }],
+    messages: [{ text: '', days: [], paisId: null, paisName: null, chatFlowId: null }],
     isEnabled: true,
     throttleMinutes: 0,
     isOutOfBusinessHours: false,
@@ -67,6 +68,7 @@ export function ScheduleRuleForm() {
   })
   const [paises, setPaises] = useState<Pais[]>([])
   const [turmas, setTurmas] = useState<Turma[]>([])
+  const [chatFlows, setChatFlows] = useState<ChatFlowListItem[]>([])
   const [activeTab, setActiveTab] = useState<number | null>(null)
 
   useEffect(() => {
@@ -85,6 +87,15 @@ export function ScheduleRuleForm() {
         setTurmas((data || []).filter(t => t.isActive))
       } catch {
         // Não impede o formulário de funcionar sem a opção de excluir turma
+      }
+    })()
+
+    void (async () => {
+      try {
+        const data = await apiFetch<ChatFlowListItem[]>('/api/chat-flows')
+        setChatFlows(data || [])
+      } catch {
+        // Não impede o formulário de funcionar sem a opção de fluxo de chatbot
       }
     })()
   }, [])
@@ -108,8 +119,8 @@ export function ScheduleRuleForm() {
         name: rule.name,
         windows,
         messages: rule.messages && rule.messages.length > 0
-          ? rule.messages.map(m => ({ text: m.text, days: m.days, paisId: m.paisId, paisName: m.paisName }))
-          : [{ text: '', days: [], paisId: null, paisName: null }],
+          ? rule.messages.map(m => ({ text: m.text, days: m.days, paisId: m.paisId, paisName: m.paisName, chatFlowId: m.chatFlowId }))
+          : [{ text: '', days: [], paisId: null, paisName: null, chatFlowId: null }],
         isEnabled: rule.isEnabled,
         throttleMinutes: rule.throttleMinutes,
         isOutOfBusinessHours: rule.isOutOfBusinessHours,
@@ -179,7 +190,7 @@ export function ScheduleRuleForm() {
 
   const addMessage = () => {
     const activePaisName = activeTab !== null ? paises.find(p => p.id === activeTab)?.name ?? null : null
-    setForm(prev => ({ ...prev, messages: [...prev.messages, { text: '', days: [], paisId: activeTab, paisName: activePaisName }] }))
+    setForm(prev => ({ ...prev, messages: [...prev.messages, { text: '', days: [], paisId: activeTab, paisName: activePaisName, chatFlowId: null }] }))
   }
 
   const removeMessage = (index: number) => {
@@ -193,6 +204,24 @@ export function ScheduleRuleForm() {
     setForm(prev => {
       const next = [...prev.messages]
       next[index] = { ...next[index], text }
+      return { ...prev, messages: next }
+    })
+  }
+
+  const setMessageMode = (index: number, mode: 'text' | 'flow') => {
+    setForm(prev => {
+      const next = [...prev.messages]
+      next[index] = mode === 'text'
+        ? { ...next[index], chatFlowId: null }
+        : { ...next[index], chatFlowId: next[index].chatFlowId ?? chatFlows[0]?.id ?? null }
+      return { ...prev, messages: next }
+    })
+  }
+
+  const updateMessageChatFlow = (index: number, chatFlowId: number) => {
+    setForm(prev => {
+      const next = [...prev.messages]
+      next[index] = { ...next[index], chatFlowId }
       return { ...prev, messages: next }
     })
   }
@@ -241,8 +270,9 @@ export function ScheduleRuleForm() {
     setSubmitting(true)
     setError(null)
 
-    const trimmedMessages = form.messages.map(m => ({ text: m.text.trim(), days: m.days, paisId: m.paisId }))
-    const hasEmptyMessageText = trimmedMessages.some(m => !m.text)
+    const trimmedMessages = form.messages.map(m => ({ text: m.text.trim(), days: m.days, paisId: m.paisId, chatFlowId: m.chatFlowId }))
+    const hasEmptyMessageText = trimmedMessages.some(m => m.chatFlowId === null && !m.text)
+    const hasFlowMessageWithoutFlow = trimmedMessages.some(m => m.chatFlowId !== null && !chatFlows.some(f => f.id === m.chatFlowId))
     const hasMessageWithoutDay = trimmedMessages.some(m => m.days.length === 0)
 
     if (!form.name.trim() || form.windows.length === 0) {
@@ -252,7 +282,13 @@ export function ScheduleRuleForm() {
     }
 
     if (trimmedMessages.length === 0 || hasEmptyMessageText) {
-      setError('Toda mensagem precisa ter um texto preenchido')
+      setError('Toda mensagem em modo texto precisa ter um texto preenchido')
+      setSubmitting(false)
+      return
+    }
+
+    if (hasFlowMessageWithoutFlow) {
+      setError('Toda mensagem em modo fluxo precisa de um fluxo de chatbot selecionado')
       setSubmitting(false)
       return
     }
@@ -556,13 +592,51 @@ export function ScheduleRuleForm() {
                     </button>
                   </div>
 
-                  <textarea
-                    value={message.text}
-                    onChange={(e) => updateMessageText(message.index, e.target.value)}
-                    placeholder="Digite a mensagem que será enviada..."
-                    rows={2}
-                    disabled={submitting}
-                  />
+                  <div className="mode-toggle" style={{ marginBottom: '8px' }}>
+                    <button
+                      type="button"
+                      className={`mode-toggle-btn ${message.chatFlowId === null ? 'active' : ''}`}
+                      onClick={() => setMessageMode(message.index, 'text')}
+                      disabled={submitting}
+                    >
+                      📝 Texto
+                    </button>
+                    <button
+                      type="button"
+                      className={`mode-toggle-btn ${message.chatFlowId !== null ? 'active' : ''}`}
+                      onClick={() => setMessageMode(message.index, 'flow')}
+                      disabled={submitting || chatFlows.length === 0}
+                      title={chatFlows.length === 0 ? 'Cadastre um fluxo em Chatbot para usar esta opção' : undefined}
+                    >
+                      🤖 Fluxo de chatbot
+                    </button>
+                  </div>
+
+                  {message.chatFlowId === null ? (
+                    <textarea
+                      value={message.text}
+                      onChange={(e) => updateMessageText(message.index, e.target.value)}
+                      placeholder="Digite a mensagem que será enviada..."
+                      rows={2}
+                      disabled={submitting}
+                    />
+                  ) : (
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <select
+                        value={message.chatFlowId}
+                        onChange={(e) => updateMessageChatFlow(message.index, Number(e.target.value))}
+                        disabled={submitting}
+                      >
+                        {chatFlows.map(flow => (
+                          <option key={flow.id} value={flow.id}>{flow.name}</option>
+                        ))}
+                      </select>
+                      <small style={{ display: 'block', marginTop: '4px', color: '#888' }}>
+                        Ao bater com o dia/país, esta mensagem inicia o fluxo escolhido em vez de mandar um texto fixo.
+                        Gerencie fluxos em <Link to="/chatbot">Chatbot</Link>.
+                      </small>
+                    </div>
+                  )}
 
                   <div className="message-day-picker">
                     {DAY_OPTIONS.map(option => (

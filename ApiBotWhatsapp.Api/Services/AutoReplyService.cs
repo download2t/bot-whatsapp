@@ -14,6 +14,8 @@ public class AutoReplyService(
     WhatsAppMessageSender messageSender,
     WhatsAppBridgeClient bridgeClient,
     MediaStorageService mediaStorage,
+    ChatFlowService chatFlowService,
+    ConversationInboxService conversationInbox,
     IConfiguration configuration,
     ILogger<AutoReplyService> logger)
 {
@@ -104,6 +106,14 @@ public class AutoReplyService(
                 return new WhatsAppWebhookResponse(false, "Outgoing message logged. Auto reply skipped.", null);
             }
 
+            // Moved up from further below so it gates both paths that follow (chat flow and
+            // ScheduleRule) uniformly, instead of only the schedule-rule one — and so a stale
+            // message doesn't pay for a contact/LID lookup it's going to discard anyway.
+            if (isStale)
+            {
+                return new WhatsAppWebhookResponse(false, $"Incoming message is older than {MaxIncomingMessageAge.TotalMinutes:0} minutes. Auto reply skipped.", null);
+            }
+
             // Resolve se quem mandou a mensagem é um Contato conhecido do MESMO dono (qualquer
             // turma) — não é mais um gate automático aqui; cada ScheduleRule decide, via
             // AudienceMode, se aceita só contato cadastrado, qualquer um, ou qualquer um exceto
@@ -172,9 +182,16 @@ public class AutoReplyService(
                 }
             }
 
-            if (isStale)
+            // If this contact already has a chat-flow conversation in progress, their reply
+            // continues it regardless of what today's ScheduleRule message would otherwise be —
+            // an in-progress conversation always wins over re-evaluating rules. Returns null
+            // when there's no conversation, and the normal rule/message selection below runs
+            // exactly as it did before chat flows existed.
+            var continuedFlowResponse = await chatFlowService.TryContinueAsync(
+                ownerUserId, normalizedPhone, request.Message ?? string.Empty, normalizedWhatsApp, brasiliaTime, cancellationToken);
+            if (continuedFlowResponse is not null)
             {
-                return new WhatsAppWebhookResponse(false, $"Incoming message is older than {MaxIncomingMessageAge.TotalMinutes:0} minutes. Auto reply skipped.", null);
+                return continuedFlowResponse;
             }
 
             var currentTime = GetCurrentBrasiliaTime(configuration["WhatsApp:TimeZoneId"]);
@@ -208,10 +225,13 @@ public class AutoReplyService(
                 return new WhatsAppWebhookResponse(false, "No message configured for the current day of week. Auto reply skipped.", null);
             }
 
-            // Check throttle: don't send if already sent within ThrottleMinutes
+            // Check throttle: don't send if already sent within ThrottleMinutes. Counts ANY
+            // outgoing message, not just automatic ones — a manual reply from the operator
+            // (e.g. via /messages) resets the same clock, so the bot doesn't jump back in right
+            // after a human already took over the conversation.
             if (rule.ThrottleMinutes > 0)
             {
-                var timeSinceLastMessage = await GetTimeSinceLastAutomaticMessageAsync(ownerUserId, normalizedPhone, brasiliaTime, cancellationToken);
+                var timeSinceLastMessage = await GetTimeSinceLastOutgoingMessageAsync(ownerUserId, normalizedPhone, brasiliaTime, cancellationToken);
 
                 if (timeSinceLastMessage.HasValue && timeSinceLastMessage.Value.TotalMinutes < rule.ThrottleMinutes)
                 {
@@ -231,7 +251,19 @@ public class AutoReplyService(
                 }
             }
 
+            // This message is configured to kick off a chat flow instead of sending fixed
+            // text — hand off to ChatFlowService, which creates the conversation and sends the
+            // flow's own start-step message (already logs it to MessageLogs itself).
+            if (messageForToday.ChatFlowId is not null)
+            {
+                return await chatFlowService.StartConversationAsync(
+                    messageForToday.ChatFlowId.Value, ownerUserId, normalizedPhone, normalizedWhatsApp, brasiliaTime, cancellationToken);
+            }
+
             var dispatchResult = await messageSender.SendMessageAsync(normalizedPhone, messageForToday.Text, true, $"user-{ownerUserId}", cancellationToken);
+            logger.LogInformation(
+                "AutoReply: sent rule text to OwnerUserId={OwnerUserId} Phone={Phone} — Success={Success} UnreadApplied={UnreadApplied}.",
+                ownerUserId, normalizedPhone, dispatchResult.Success, dispatchResult.UnreadApplied);
 
             var outgoingLog = new ApiBotWhatsapp.Api.Models.MessageLog
             {
@@ -249,6 +281,7 @@ public class AutoReplyService(
 
             dbContext.MessageLogs.Add(outgoingLog);
             await dbContext.SaveChangesAsync(cancellationToken);
+            await conversationInbox.MarkPendingReviewAsync(ownerUserId, normalizedPhone, cancellationToken);
 
             return new WhatsAppWebhookResponse(dispatchResult.Success, dispatchResult.Status, messageForToday.Text);
         }
@@ -330,12 +363,11 @@ public class AutoReplyService(
         return false;
     }
 
-    private async Task<TimeSpan?> GetTimeSinceLastAutomaticMessageAsync(int ownerUserId, string phoneNumber, DateTime nowReference, CancellationToken cancellationToken)
+    private async Task<TimeSpan?> GetTimeSinceLastOutgoingMessageAsync(int ownerUserId, string phoneNumber, DateTime nowReference, CancellationToken cancellationToken)
     {
         var lastMessage = await dbContext.MessageLogs
             .Where(m => m.OwnerUserId == ownerUserId
                 && m.PhoneNumber == phoneNumber
-                && m.IsAutomatic
                 && m.Direction == "Outgoing")
             .OrderByDescending(m => m.TimestampUtc)
             .FirstOrDefaultAsync(cancellationToken);

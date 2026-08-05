@@ -169,7 +169,7 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
         }
     }
 
-    public async Task<(bool Success, string Status, string? MessageId)> SendMessageAsync(
+    public async Task<(bool Success, string Status, string? MessageId, bool UnreadApplied)> SendMessageAsync(
         string phoneNumber,
         string message,
         bool markAsUnread,
@@ -198,17 +198,17 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
         }
         catch (Exception ex)
         {
-            return (false, $"Bridge unavailable: {ex.Message}", null);
+            return (false, $"Bridge unavailable: {ex.Message}", null, false);
         }
 
         if (response.IsSuccessStatusCode)
         {
             var payload = await response.Content.ReadFromJsonAsync<SendMessageBridgeResponse>(cancellationToken: cancellationToken);
-            return (true, "Message sent through WhatsApp bridge.", payload?.MessageId);
+            return (true, "Message sent through WhatsApp bridge.", payload?.MessageId, payload?.UnreadApplied ?? false);
         }
 
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
-        return (false, string.IsNullOrWhiteSpace(body) ? $"Bridge returned {(int)response.StatusCode}." : body, null);
+        return (false, string.IsNullOrWhiteSpace(body) ? $"Bridge returned {(int)response.StatusCode}." : body, null, false);
     }
 
     private record SendMessageBridgeResponse(bool Success, string? SessionId, string? SourceWhatsAppNumber, string? MessageId, bool UnreadApplied);

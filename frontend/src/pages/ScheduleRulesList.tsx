@@ -45,6 +45,10 @@ function getCoveredPaisNames(rule: ScheduleRule): string[] {
   return Array.from(names)
 }
 
+function usesChatFlow(rule: ScheduleRule): boolean {
+  return rule.messages.some(m => m.chatFlowId !== null)
+}
+
 // null quando é o padrão ("RegisteredContacts") — só mostra o badge quando a regra
 // realmente desvia do comportamento usual, pra não poluir todo card com a mesma info.
 function getAudienceLabel(rule: ScheduleRule): string | null {
@@ -103,7 +107,7 @@ export function ScheduleRulesList() {
           startTime: updated.startTime,
           endTime: updated.endTime,
           windows: updated.windows,
-          messages: updated.messages.map(m => ({ text: m.text, days: m.days, paisId: m.paisId })),
+          messages: updated.messages.map(m => ({ text: m.text, days: m.days, paisId: m.paisId, chatFlowId: m.chatFlowId })),
           isEnabled: updated.isEnabled,
           throttleMinutes: updated.throttleMinutes,
           isOutOfBusinessHours: updated.isOutOfBusinessHours,
@@ -172,13 +176,19 @@ export function ScheduleRulesList() {
                 )}
                 {rule.messages[0] && (
                   <p className="message-preview-compact">
-                    <strong>{rule.messages[0].dayNames.join(', ')}:</strong> {rule.messages[0].text}
+                    <strong>{rule.messages[0].dayNames.join(', ')}:</strong>{' '}
+                    {rule.messages[0].chatFlowId !== null
+                      ? `🤖 ${rule.messages[0].chatFlowName ?? 'fluxo de chatbot'}`
+                      : rule.messages[0].text}
                     {rule.messages.length > 1 && <span className="message-more"> +{rule.messages.length - 1}</span>}
                   </p>
                 )}
               </div>
 
               <div className="rule-config">
+                {usesChatFlow(rule) && (
+                  <span className="config-badge">🤖 usa chatbot</span>
+                )}
                 {getAudienceLabel(rule) && (
                   <span className="config-badge">{getAudienceLabel(rule)}</span>
                 )}

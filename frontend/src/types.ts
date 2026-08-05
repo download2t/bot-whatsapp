@@ -8,6 +8,39 @@ export type LoginResponse = {
 
 export type AudienceMode = 'RegisteredContacts' | 'Anyone' | 'AnyoneExceptRegistered' | 'AnyoneExceptTurma'
 
+export type ChatFlowOption = {
+  id: number
+  label: string
+  matchKeywords: string[]
+  nextStepId: number
+}
+
+export type ChatFlowStep = {
+  id: number
+  label: string | null
+  messageText: string
+  isStartStep: boolean
+  isEndStep: boolean
+  invalidAnswerMessage: string | null
+  options: ChatFlowOption[]
+}
+
+export type ChatFlow = {
+  id: number
+  name: string
+  timeoutMinutes: number
+  timeoutMessage: string | null
+  createdAtUtc: string
+  steps: ChatFlowStep[]
+}
+
+export type ChatFlowListItem = {
+  id: number
+  name: string
+  stepCount: number
+  createdAtUtc: string
+}
+
 export type ScheduleRule = {
   id: number
   name: string
@@ -39,6 +72,8 @@ export type ScheduleRuleMessage = {
   paisId: number | null
   paisName: string | null
   paisDdi: string | null
+  chatFlowId: number | null
+  chatFlowName: string | null
 }
 
 export type Pais = {

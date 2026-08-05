@@ -3,6 +3,7 @@ using System;
 using ApiBotWhatsapp.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ApiBotWhatsapp.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260804180303_RemoveChatFlowIsActive")]
+    partial class RemoveChatFlowIsActive
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.3");
@@ -149,9 +152,6 @@ namespace ApiBotWhatsapp.Api.Migrations
 
                     b.Property<int>("OwnerUserId")
                         .HasColumnType("INTEGER");
-
-                    b.Property<string>("TimeoutMessage")
-                        .HasColumnType("TEXT");
 
                     b.Property<int>("TimeoutMinutes")
                         .HasColumnType("INTEGER");
@@ -299,33 +299,6 @@ namespace ApiBotWhatsapp.Api.Migrations
                     b.HasIndex("OwnerUserId", "PhoneNumber");
 
                     b.ToTable("Contatos");
-                });
-
-            modelBuilder.Entity("ApiBotWhatsapp.Api.Models.ConversationState", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("OwnerUserId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<bool>("PendingReview")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("PhoneNumber")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("UpdatedAtUtc")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("OwnerUserId", "PhoneNumber")
-                        .IsUnique();
-
-                    b.ToTable("ConversationStates");
                 });
 
             modelBuilder.Entity("ApiBotWhatsapp.Api.Models.MessageLog", b =>

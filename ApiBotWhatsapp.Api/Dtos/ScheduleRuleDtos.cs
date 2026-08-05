@@ -4,7 +4,7 @@ public record ScheduleRuleTimeWindowRequest(int DayOfWeek, string StartTime, str
 
 public record ScheduleRuleTimeWindowResponse(int DayOfWeek, string DayName, string StartTime, string EndTime);
 
-public record ScheduleRuleMessageRequest(string Text, IReadOnlyList<int> Days, int? PaisId = null);
+public record ScheduleRuleMessageRequest(string Text, IReadOnlyList<int> Days, int? PaisId = null, int? ChatFlowId = null);
 
 public record ScheduleRuleMessageResponse(
     string Text,
@@ -12,7 +12,9 @@ public record ScheduleRuleMessageResponse(
     IReadOnlyList<string> DayNames,
     int? PaisId,
     string? PaisName,
-    string? PaisDdi);
+    string? PaisDdi,
+    int? ChatFlowId,
+    string? ChatFlowName);
 
 public record ScheduleRuleRequest(
     string Name,

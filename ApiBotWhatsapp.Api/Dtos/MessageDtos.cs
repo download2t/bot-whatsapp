@@ -30,3 +30,5 @@ public record DashboardStatusResponse(
     int TodayIncoming,
     int TodayOutgoing,
     int TodayAutomatic);
+
+public record MarkConversationReadRequest(string PhoneNumber);

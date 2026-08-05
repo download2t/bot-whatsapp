@@ -176,6 +176,17 @@ export function Navigation({
             <button
               className="nav-trigger"
               onClick={() => {
+                navigate("/chatbot");
+                closeMenus();
+              }}
+            >
+              Chatbot
+            </button>
+          </li>
+          <li className="nav-item">
+            <button
+              className="nav-trigger"
+              onClick={() => {
                 navigate("/documentacao");
                 closeMenus();
               }}

@@ -215,7 +215,7 @@ public class BulkMessagesController(
 
         var normalizedPhone = PhoneNumberUtils.Normalize(targetPhone);
 
-        var (success, status, messageId) = await sender.SendMessageAsync(
+        var (success, status, messageId, _) = await sender.SendMessageAsync(
             normalizedPhone,
             textMessage,
             false, // markAsUnread
@@ -256,6 +256,17 @@ public class BulkMessagesController(
         };
 
         dbContext.MessageLogs.Add(log);
+
+        // A manual reply means a human has taken over — drop any in-progress chat-flow
+        // conversation for this contact so their next message isn't misread as a flow answer
+        // (e.g. "1"/"2") instead of a normal reply to the operator.
+        var activeConversation = await dbContext.ChatFlowConversations
+            .FirstOrDefaultAsync(c => c.OwnerUserId == ownerUserId && c.PhoneNumber == normalizedPhone, cancellationToken);
+        if (activeConversation is not null)
+        {
+            dbContext.ChatFlowConversations.Remove(activeConversation);
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return Ok(new { success = true, status });

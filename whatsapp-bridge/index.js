@@ -465,6 +465,43 @@ function ensureSession(id) {
   return session;
 }
 
+// whatsapp-web.js's client.destroy()/logout() can hang indefinitely if the underlying
+// Puppeteer/Chromium process is wedged (we've directly observed orphaned chrome.exe processes
+// from exactly this in this project). Without a hard timeout here, an `await` on either call
+// never resolves, so session.clientAlive never gets reset back to false — and
+// initializeSessionIfNeeded()'s guard ("if clientAlive, do nothing") then permanently refuses
+// to start a new session/QR for that id, no matter how many times connect/disconnect is
+// retried from the UI. This wraps the call with a bounded wait and, if it doesn't settle in
+// time, force-kills the underlying Chromium process directly as a fallback.
+const CLIENT_CLOSE_TIMEOUT_MS = 8000;
+
+async function closeClientSafely(session, methodName) {
+  let settled = false;
+
+  const attempt = session.client[methodName]()
+    .catch(() => {})
+    .finally(() => {
+      settled = true;
+    });
+
+  await Promise.race([attempt, delay(CLIENT_CLOSE_TIMEOUT_MS)]);
+
+  if (!settled) {
+    console.log(
+      `[SESSION] ${session.id}: client.${methodName}() não respondeu em ${CLIENT_CLOSE_TIMEOUT_MS}ms — forçando encerramento do Chromium.`,
+    );
+    try {
+      const proc = session.client.pupBrowser?.process?.();
+      if (proc && !proc.killed) {
+        proc.kill("SIGKILL");
+        console.log(`[SESSION] ${session.id}: processo do Chromium (pid=${proc.pid}) finalizado à força.`);
+      }
+    } catch (killError) {
+      console.log(`[SESSION] ${session.id}: falha ao tentar matar o processo do Chromium — ${killError?.message ?? killError}`);
+    }
+  }
+}
+
 async function restartSessionById(id) {
   const sessionId = normalizeSessionId(id);
   const previous = sessions.get(sessionId);
@@ -473,9 +510,7 @@ async function restartSessionById(id) {
   }
 
   previous.manualDisconnect = true;
-  try {
-    await previous.client.destroy();
-  } catch {}
+  await closeClientSafely(previous, "destroy");
 
   sessions.delete(sessionId);
   const recreated = ensureSession(sessionId);
@@ -491,13 +526,8 @@ async function logoutDefinitiveById(id) {
   }
 
   session.manualDisconnect = true;
-  try {
-    await session.client.logout();
-  } catch {}
-
-  try {
-    await session.client.destroy();
-  } catch {}
+  await closeClientSafely(session, "logout");
+  await closeClientSafely(session, "destroy");
 
   sessions.delete(sessionId);
 
@@ -535,16 +565,10 @@ async function initializeSessionIfNeeded(session) {
 async function disconnectSession(session, { logout = false } = {}) {
   session.manualDisconnect = true;
 
-  if (logout) {
-    try {
-      await session.client.logout();
-    } catch {}
-  } else {
-    try {
-      await session.client.destroy();
-    } catch {}
-  }
+  await closeClientSafely(session, logout ? "logout" : "destroy");
 
+  // Unconditional — must run even if the client close above hung and had to be forced, so a
+  // stuck disconnect can never leave the session unable to start a fresh one afterwards.
   session.status = "disconnected";
   session.clientReady = false;
   session.qrDataUrl = null;
@@ -912,15 +936,58 @@ app.post("/messages/send", async (req, res) => {
     }
 
     let unreadApplied = false;
+    let unreadError = null;
+    let unreadProbe = null;
     if (Boolean(markAsUnread)) {
       try {
         const chat = await senderSession.client.getChatById(target);
         if (chat && typeof chat.markUnread === "function") {
           await chat.markUnread();
           unreadApplied = true;
+        } else {
+          unreadError = "chat.markUnread is not a function on the resolved chat object.";
         }
-      } catch {
+      } catch (error) {
         unreadApplied = false;
+        // The in-page error thrown by WhatsApp Web's own (minified) bundle usually has an
+        // unhelpful one-letter .message — the probe below inspects the actual live objects our
+        // call depends on, so we know exactly which reference broke instead of guessing.
+        unreadError = error?.message ?? String(error);
+        console.log(`[SEND] Sessão ${sessionId}: markUnread falhou para ${target}: ${unreadError}`);
+
+        try {
+          unreadProbe = await senderSession.client.pupPage.evaluate(async (chatId) => {
+            const out = {};
+            try {
+              const chat = await window.WWebJS.getChat(chatId, { getAsModel: false });
+              out.chatFound = Boolean(chat);
+              out.chatKeys = chat ? Object.keys(chat).slice(0, 40) : null;
+              out.markedUnread = chat ? chat.markedUnread : undefined;
+              // WhatsApp Web 2.3000.104xxxx renamed message-key _serialized to $1 in some
+              // places (see wwebjs/whatsapp-web.js PR #201850) — check if chat.id suffered the
+              // same rename, which would explain Cmd.markChatUnread crashing internally even
+              // though the chat and the Cmd module both resolve fine on our side.
+              out.chatIdKeys = chat?.id ? Object.keys(chat.id) : null;
+              out.chatIdSerialized = chat?.id?._serialized ?? null;
+              out.chatIdDollar1 = chat?.id?.$1 ?? null;
+              out.isLidChat = typeof chat?.id?._serialized === "string" && chat.id._serialized.includes("@lid");
+            } catch (e) {
+              out.getChatError = e?.message ?? String(e);
+            }
+            try {
+              const cmdModule = window.require("WAWebCmd");
+              out.cmdModuleFound = Boolean(cmdModule);
+              out.cmdKeys = cmdModule ? Object.keys(cmdModule).slice(0, 40) : null;
+              out.cmdHasMarkChatUnread = Boolean(cmdModule?.Cmd?.markChatUnread);
+            } catch (e) {
+              out.cmdModuleError = e?.message ?? String(e);
+            }
+            return out;
+          }, target);
+          console.log(`[SEND] Sessão ${sessionId}: markUnread probe: ${JSON.stringify(unreadProbe)}`);
+        } catch (probeError) {
+          unreadProbe = { probeFailed: probeError?.message ?? String(probeError) };
+        }
       }
     }
 
@@ -929,7 +996,9 @@ app.post("/messages/send", async (req, res) => {
       sessionId: senderSession.id,
       sourceWhatsAppNumber: senderSession.phoneNumber,
       messageId: result?.id?._serialized ?? null,
+      unreadProbe,
       unreadApplied,
+      unreadError,
     });
   } catch (error) {
     console.log(`[SEND] Falha ao enviar mensagem: ${error?.stack ?? error?.message ?? error}`);
