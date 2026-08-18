@@ -215,6 +215,9 @@ public class BulkMessagesController(
 
         var normalizedPhone = PhoneNumberUtils.Normalize(targetPhone);
 
+        // confirmDelivery: true - same reasoning as the bulk campaign runner. Without this, a
+        // broken/zombie session could report success (and get logged as "Sent" in the chat
+        // history) for a message that never actually reached WhatsApp's servers.
         var (success, status, messageId, _) = await sender.SendMessageAsync(
             normalizedPhone,
             textMessage,
@@ -223,7 +226,8 @@ public class BulkMessagesController(
             cancellationToken,
             request.MediaBase64,
             request.MediaMimeType,
-            request.MediaFileName
+            request.MediaFileName,
+            confirmDelivery: true
         );
 
         if (!success) return BadRequest($"Falha ao enviar: {status}");

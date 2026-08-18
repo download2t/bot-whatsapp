@@ -108,6 +108,31 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
         }
     }
 
+    /// <summary>
+    /// Emergency hard reset for a session that looks "connected" but no longer actually works
+    /// (WhatsApp blocked/logged it out remotely while the local session data still thinks it's
+    /// linked). Unlike DisconnectAsync (a soft destroy() that keeps the local auth files and can
+    /// just reconnect to the same broken state, even across a deploy/process restart), this logs
+    /// out for real, force-kills the underlying Chromium process if it's wedged, deletes the
+    /// session's local auth folder, and removes it from the persisted session list — so the next
+    /// /connect always starts completely fresh and asks for a new QR/pairing code.
+    /// </summary>
+    public async Task<bool> ForceResetAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var sessionPath = Uri.EscapeDataString(sessionId);
+            var response = await _client.PostAsync($"{BaseUrl}/session/{sessionPath}/logout-definitivo", null, cancellationToken);
+            // 404 means the bridge had no session under this id at all - that's still the goal
+            // state (nothing left to reconnect to), so treat it as a successful reset too.
+            return response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NotFound;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public async Task<(string? PairingCode, string? Error)> GetPairingCodeAsync(string phoneNumber, string? sessionId, CancellationToken cancellationToken)
     {
         try
@@ -177,7 +202,8 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
         CancellationToken cancellationToken,
         string? mediaBase64 = null,
         string? mediaMimeType = null,
-        string? mediaFileName = null)
+        string? mediaFileName = null,
+        bool confirmDelivery = false)
     {
         HttpResponseMessage response;
         try
@@ -192,7 +218,8 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
                     sessionId = senderSessionId,
                     mediaBase64,
                     mediaMimeType,
-                    mediaFileName
+                    mediaFileName,
+                    confirmDelivery
                 },
                 cancellationToken);
         }

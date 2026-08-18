@@ -41,6 +41,18 @@ public class WhatsAppController(WhatsAppBridgeClient bridgeClient) : ControllerB
         return ok ? Accepted() : BadRequest("Unable to disconnect WhatsApp bridge.");
     }
 
+    // Emergency reset: for when the session is stuck showing "connected" but the WhatsApp
+    // account was actually blocked/logged out on the other end, and a normal disconnect (or even
+    // restarting the whole deploy) never clears it because the local session data on disk still
+    // thinks it's linked and just reconnects to the same broken state. This forces a real logout,
+    // wipes that local session data, and always leaves the user able to link a fresh QR/code.
+    [HttpPost("reset")]
+    public async Task<ActionResult> Reset(CancellationToken cancellationToken)
+    {
+        var ok = await bridgeClient.ForceResetAsync(MySessionId, cancellationToken);
+        return ok ? Accepted() : BadRequest("Unable to reset WhatsApp session.");
+    }
+
     [HttpPost("pairing-code")]
     public async Task<ActionResult<WhatsAppPairingCodeResponse>> PairingCode(
         [FromBody] WhatsAppPairingCodeRequest request,

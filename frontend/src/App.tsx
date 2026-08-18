@@ -5,6 +5,7 @@ import type { LoginResponse } from './types'
 import { Dashboard } from './pages/Dashboard'
 import { LoginPage } from './pages/LoginPage.tsx'
 import { Messages } from './pages/Messages'
+import { AutomaticMessages } from './pages/AutomaticMessages'
 import { Documentacao } from './pages/Documentacao'
 import { TurmasList } from './pages/TurmasList'
 import { TurmaForm } from './pages/TurmaForm'
@@ -86,6 +87,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/messages" element={<Messages />} />
+        <Route path="/messages/automaticas" element={<AutomaticMessages />} />
         <Route path="/documentacao" element={<Documentacao />} />
         <Route path="/messages/bulk" element={<BulkMessages />} />
         <Route path="/messages/bulk/historico" element={<BulkCampaignHistory />} />

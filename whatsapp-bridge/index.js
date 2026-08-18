@@ -37,6 +37,31 @@ const ACK_STATUS_BY_CODE = {
   4: "played",
 };
 
+// client.sendMessage() can resolve successfully (with a real message id) purely from the local
+// Puppeteer page state even when the session is actually a zombie - e.g. WhatsApp blocked or
+// remotely logged out the number while the browser page/Chromium process stayed alive. Without
+// this, callers had no way to tell "WhatsApp's servers actually received it" apart from "the
+// in-page JS call returned", which is exactly how a bulk campaign ended up marking recipients as
+// Sent for messages that were never really delivered. ack code 1+ means WhatsApp's own servers
+// acknowledged the message; -1 means WhatsApp itself reported failure.
+const SEND_CONFIRMATION_TIMEOUT_MS = 20000;
+const pendingSendConfirmations = new Map();
+
+function waitForSendConfirmation(messageId, timeoutMs) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingSendConfirmations.delete(messageId);
+      resolve({ confirmed: false, ackStatus: null, timedOut: true });
+    }, timeoutMs);
+
+    pendingSendConfirmations.set(messageId, (ackCode, ackStatus) => {
+      clearTimeout(timer);
+      pendingSendConfirmations.delete(messageId);
+      resolve({ confirmed: ackCode >= 1, ackStatus, timedOut: false });
+    });
+  });
+}
+
 let apiAvailable = false;
 let sessionCounter = 1;
 let persistSessionsQueue = Promise.resolve();
@@ -433,6 +458,15 @@ function ensureSession(id) {
       if (!message.fromMe) return;
 
       const ackStatus = ACK_STATUS_BY_CODE[String(ack)];
+
+      // Resolve any /messages/send call waiting on confirmation for this message, regardless of
+      // whether we can also forward it to the API below - the caller needs this signal even if
+      // owner/messageId resolution for the webhook forward fails for some reason.
+      const waitingMessageId = message.id?._serialized;
+      if (waitingMessageId && pendingSendConfirmations.has(waitingMessageId)) {
+        pendingSendConfirmations.get(waitingMessageId)(Number(ack), ackStatus ?? null);
+      }
+
       if (!ackStatus) return;
 
       const messageId = message.id?._serialized;
@@ -933,6 +967,27 @@ app.post("/messages/send", async (req, res) => {
         () => senderSession.processedMessages.delete(result.id._serialized),
         60000,
       );
+    }
+
+    // Callers that need to trust the "sent" result for record-keeping (e.g. a bulk campaign
+    // marking a recipient as Sent) can opt into waiting for WhatsApp's own server ack instead of
+    // trusting that sendMessage() merely resolved — see the SEND_CONFIRMATION_TIMEOUT_MS comment
+    // above for why that alone isn't proof of real delivery.
+    if (Boolean(req.body?.confirmDelivery) && result?.id?._serialized) {
+      const confirmation = await waitForSendConfirmation(result.id._serialized, SEND_CONFIRMATION_TIMEOUT_MS);
+      if (!confirmation.confirmed) {
+        console.log(
+          `[SEND] Sessão ${sessionId}: mensagem ${result.id._serialized} para ${target} NÃO confirmada pelo WhatsApp em ${SEND_CONFIRMATION_TIMEOUT_MS}ms (timedOut=${confirmation.timedOut}, ackStatus=${confirmation.ackStatus ?? "nenhum"}) — tratando como falha em vez de Sent.`,
+        );
+        return res.status(502).json({
+          success: false,
+          sessionId: senderSession.id,
+          messageId: result.id._serialized,
+          error: confirmation.ackStatus === "error"
+            ? "WhatsApp recusou a mensagem (ack de erro)."
+            : "Mensagem não confirmada pelo WhatsApp — a sessão pode estar bloqueada ou desconectada. Use o reset de emergência e reconecte.",
+        });
+      }
     }
 
     let unreadApplied = false;

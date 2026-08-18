@@ -14,7 +14,8 @@ public class WhatsAppMessageSender(IConfiguration configuration, IHttpClientFact
         CancellationToken cancellationToken,
         string? mediaBase64 = null,
         string? mediaMimeType = null,
-        string? mediaFileName = null)
+        string? mediaFileName = null,
+        bool confirmDelivery = false)
     {
         var candidates = PhoneNumberUtils.GetEquivalentBrazilianNumbers(phoneNumber);
         if (candidates.Length == 0)
@@ -27,7 +28,7 @@ public class WhatsAppMessageSender(IConfiguration configuration, IHttpClientFact
         {
             foreach (var candidate in candidates)
             {
-                var result = await bridgeClient.SendMessageAsync(candidate, message, markAsUnread, senderSessionId, cancellationToken, mediaBase64, mediaMimeType, mediaFileName);
+                var result = await bridgeClient.SendMessageAsync(candidate, message, markAsUnread, senderSessionId, cancellationToken, mediaBase64, mediaMimeType, mediaFileName, confirmDelivery);
                 if (result.Success)
                 {
                     return result;

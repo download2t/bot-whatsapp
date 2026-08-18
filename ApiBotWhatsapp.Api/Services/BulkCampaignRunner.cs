@@ -32,7 +32,11 @@ public class BulkCampaignRunner(IServiceScopeFactory scopeFactory)
             || normalized.Contains("unauthorized")
             || normalized.Contains("not connected")
             || normalized.Contains("disconnected")
+            || normalized.Contains("desconect")
             || normalized.Contains("session")
+            || normalized.Contains("sessão")
+            || normalized.Contains("não confirmada")
+            || normalized.Contains("nao confirmada")
             || normalized.Contains("rate limit")
             || normalized.Contains("429")
             || normalized.Contains("403")
@@ -105,6 +109,11 @@ public class BulkCampaignRunner(IServiceScopeFactory scopeFactory)
                     // Intentionally CancellationToken.None: once a send is in flight we let it
                     // finish rather than aborting the HTTP call to the bridge mid-flight, which
                     // could leave a message actually delivered but recorded as cancelled/failed.
+                    // confirmDelivery: true so an item is only ever recorded as "Sent" once
+                    // WhatsApp's own servers acknowledged it - client.sendMessage() resolving on
+                    // the bridge side is not proof of that (a zombie/blocked session can still
+                    // resolve it locally), which is exactly how campaigns used to end up counting
+                    // recipients as sent for messages that never actually went out.
                     result = await sender.SendMessageAsync(
                         normalizedPhone,
                         personalized,
@@ -113,7 +122,8 @@ public class BulkCampaignRunner(IServiceScopeFactory scopeFactory)
                         CancellationToken.None,
                         mediaBase64,
                         campaign.MediaMimeType,
-                        campaign.MediaFileName);
+                        campaign.MediaFileName,
+                        confirmDelivery: true);
                 }
                 catch (Exception ex)
                 {

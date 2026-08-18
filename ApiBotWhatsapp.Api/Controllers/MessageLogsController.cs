@@ -68,6 +68,7 @@ public class MessageLogsController(AppDbContext dbContext, ConversationInboxServ
     public async Task<ActionResult<PagedMessageLogResponse>> Search(
         [FromQuery] string? phoneNumber,
         [FromQuery] string? direction,
+        [FromQuery] bool? isAutomatic,
         [FromQuery] DateOnly? startDate,
         [FromQuery] DateOnly? endDate,
         [FromQuery] string? sortBy,
@@ -79,7 +80,7 @@ public class MessageLogsController(AppDbContext dbContext, ConversationInboxServ
         page = Math.Max(page, 1);
         pageSize = Math.Clamp(pageSize, 5, 100);
 
-        var query = BuildQuery(this.GetCurrentUserId(), phoneNumber, direction, startDate, endDate);
+        var query = BuildQuery(this.GetCurrentUserId(), phoneNumber, direction, isAutomatic, startDate, endDate);
         var orderedQuery = ApplySorting(query, sortBy, sortOrder);
 
         var totalCount = await orderedQuery.CountAsync(cancellationToken);
@@ -111,13 +112,14 @@ public class MessageLogsController(AppDbContext dbContext, ConversationInboxServ
     public async Task<IActionResult> Export(
         [FromQuery] string? phoneNumber,
         [FromQuery] string? direction,
+        [FromQuery] bool? isAutomatic,
         [FromQuery] DateOnly? startDate,
         [FromQuery] DateOnly? endDate,
         [FromQuery] string? sortBy,
         [FromQuery] string? sortOrder,
         CancellationToken cancellationToken = default)
     {
-        var query = ApplySorting(BuildQuery(this.GetCurrentUserId(), phoneNumber, direction, startDate, endDate), sortBy, sortOrder);
+        var query = ApplySorting(BuildQuery(this.GetCurrentUserId(), phoneNumber, direction, isAutomatic, startDate, endDate), sortBy, sortOrder);
 
         var items = await query
             .Select(log => new MessageLogResponse(
@@ -193,6 +195,7 @@ public class MessageLogsController(AppDbContext dbContext, ConversationInboxServ
         int ownerUserId,
         string? phoneNumber,
         string? direction,
+        bool? isAutomatic,
         DateOnly? startDate,
         DateOnly? endDate)
     {
@@ -212,6 +215,11 @@ public class MessageLogsController(AppDbContext dbContext, ConversationInboxServ
              direction.Equals("Outgoing", StringComparison.OrdinalIgnoreCase)))
         {
             query = query.Where(item => item.Direction == direction);
+        }
+
+        if (isAutomatic.HasValue)
+        {
+            query = query.Where(item => item.IsAutomatic == isAutomatic.Value);
         }
 
         if (startDate.HasValue)

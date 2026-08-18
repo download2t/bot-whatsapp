@@ -145,3 +145,12 @@
   font-size: 0.86rem;
   color: #64748b;
 }
+
+.wa-emergency-card {
+  border-color: #fecaca;
+  background: #fff7f7;
+}
+
+.wa-emergency-card h2 {
+  color: #991b1b;
+}

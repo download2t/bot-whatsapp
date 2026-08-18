@@ -143,6 +143,39 @@ export function WhatsAppConnectionsPage() {
     }
   }
 
+  // For when the connection looks "Conectado" here but the número was actually blocked/deslogado
+  // do lado do WhatsApp - nesse caso um disconnect normal (ou até reiniciar o deploy) não resolve,
+  // porque os dados locais da sessão continuam achando que ainda está vinculado. Isso apaga esses
+  // dados de vez, então a próxima tentativa sempre pede um QR/código novo.
+  const handleEmergencyReset = async () => {
+    const confirmStep1 = window.confirm(
+      'Reset de emergência: isso vai apagar os dados locais dessa sessão do WhatsApp e forçar uma desvinculação completa. ' +
+        'Use só se a conexão está travada mostrando "Conectado" mas na prática parou de funcionar. ' +
+        'Você vai precisar escanear um QR (ou gerar código) novo depois. Continuar?',
+    )
+    if (!confirmStep1) {
+      return
+    }
+
+    const confirmStep2 = window.confirm('Confirma o reset de emergência? Essa ação não pode ser desfeita.')
+    if (!confirmStep2) {
+      return
+    }
+
+    setBusy(true)
+    try {
+      await apiFetch('/api/whatsapp/reset', { method: 'POST' })
+      setPairingCode(null)
+      setQrDataUrl(null)
+      setMessage('Sessão resetada. Escaneie um QR novo ou gere um código para vincular novamente.')
+      await loadStatus()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Falha ao resetar a sessão')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="container wa-connections-page">
       <div className="wa-header">
@@ -169,6 +202,18 @@ export function WhatsAppConnectionsPage() {
             Desconectar
           </button>
         )}
+      </section>
+
+      <section className="wa-list-card wa-emergency-card">
+        <h2>Reset de emergência</h2>
+        <p className="wa-hint">
+          Use se a tela ficar mostrando "Conectado" mas as mensagens pararem de funcionar (número bloqueado ou
+          desconectado do lado do WhatsApp) — inclusive se reiniciar o servidor não resolver. Isso apaga os dados
+          locais dessa sessão e força uma vinculação totalmente nova.
+        </p>
+        <button className="btn btn-danger" onClick={() => void handleEmergencyReset()} disabled={busy} style={{ marginTop: '8px' }}>
+          Resetar sessão (emergência)
+        </button>
       </section>
 
       {!status?.isConnected && (

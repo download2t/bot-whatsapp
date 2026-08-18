@@ -187,6 +187,17 @@ export function Navigation({
             <button
               className="nav-trigger"
               onClick={() => {
+                navigate("/messages/automaticas");
+                closeMenus();
+              }}
+            >
+              Mensagens Automáticas
+            </button>
+          </li>
+          <li className="nav-item">
+            <button
+              className="nav-trigger"
+              onClick={() => {
                 navigate("/documentacao");
                 closeMenus();
               }}
