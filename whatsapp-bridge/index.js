@@ -1099,13 +1099,25 @@ void restorePersistedSessions().catch((error) => {
   );
 });
 
-process.on("SIGINT", async () => {
+// `systemctl stop` (used by deploy.sh) sends SIGTERM, not SIGINT — this used to only listen for
+// SIGINT, so on a normal deploy stop this handler never ran at all, and shutdown fell through to
+// systemd's default: SIGTERM to the whole cgroup (Node + every Puppeteer/Chromium child process
+// together), then wait up to TimeoutStopSec (90s by default, not overridden in the systemd unit)
+// before SIGKILL. Chromium doesn't always exit promptly on SIGTERM, so that 90s wait is exactly
+// what made "Parando serviços" in deploy.sh occasionally hang for a long time.
+// closeClientSafely() (used for the HTTP disconnect/restart routes) already solves this - bounded
+// wait, then force-kills the underlying Chromium process directly if it's wedged - it just wasn't
+// wired up here. Using it here too bounds shutdown to a few seconds even in the worst case.
+async function shutdown() {
   try {
     const tasks = Array.from(sessions.values()).map((session) =>
-      session.client.destroy().catch(() => undefined),
+      closeClientSafely(session, "destroy"),
     );
     await Promise.all(tasks);
   } finally {
     process.exit(0);
   }
-});
+}
+
+process.on("SIGINT", () => void shutdown());
+process.on("SIGTERM", () => void shutdown());

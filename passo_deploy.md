@@ -117,6 +117,7 @@ WorkingDirectory=/opt/mydevsystem/publish/api
 ExecStart=/usr/bin/dotnet ApiBotWhatsapp.Api.dll --urls http://127.0.0.1:5207
 Restart=always
 RestartSec=10
+TimeoutStopSec=20
 SyslogIdentifier=mydev-api
 Environment=ASPNETCORE_ENVIRONMENT=Production
 
@@ -126,6 +127,13 @@ WantedBy=multi-user.target
 
 `mydev_bridge.service` segue o mesmo padrão, com `WorkingDirectory` apontando para
 `/opt/mydevsystem/whatsapp-bridge` e `ExecStart` chamando `node index.js` (ou via `npm start`).
+
+> **`TimeoutStopSec=20`**: sem isso, o padrão do systemd é esperar até 90s por um `systemctl stop`
+> antes de forçar o encerramento — e como o bridge sobe o Chromium via Puppeteer, às vezes esses
+> processos não morrem rápido com SIGTERM, o que fazia o passo "Parando serviços" do `deploy.sh`
+> travar por até 90s. O bridge (`index.js`) já trata SIGTERM chamando a mesma rotina que
+> força-mata o Chromium se ele travar (ver `closeClientSafely` no código), então isso é só uma
+> segunda camada de proteção — vale colocar em `mydev_bridge.service` também.
 
 ## 3. Preparar um servidor novo (do zero)
 
