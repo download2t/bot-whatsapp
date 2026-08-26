@@ -4,6 +4,7 @@ export type LoginResponse = {
   username: string
   isAdmin: boolean
   userTitle: string | null
+  isCalendarUser: boolean
 }
 
 export type AudienceMode = 'RegisteredContacts' | 'Anyone' | 'AnyoneExceptRegistered' | 'AnyoneExceptTurma'
@@ -131,6 +132,7 @@ export type UserProfile = {
   title?: string | null
   notes?: string | null
   createdAtUtc?: string
+  isCalendarUser?: boolean
 }
 
 export type UserListItem = {
@@ -142,6 +144,7 @@ export type UserListItem = {
   phone?: string | null
   fullName?: string | null
   createdAtUtc: string
+  isCalendarUser?: boolean
 }
 
 export type WhatsAppPairingCodeResponse = {
@@ -202,4 +205,28 @@ export type BulkCampaignListItem = {
   failedCount: number
   createdAtUtc: string
   finishedAtUtc: string | null
+}
+
+// Módulo Calendário: lista compartilhada entre todos os usuários com IsCalendarUser,
+// sem nenhuma relação com Contato/Turma/OwnerUserId acima.
+export type CalendarPerson = {
+  id: number
+  name: string
+  birthDate: string | null
+  age: number | null
+  phoneNumber: string | null
+  email: string | null
+  notes: string | null
+  isActive: boolean
+}
+
+export type CalendarReminder = {
+  id: number
+  title: string
+  description: string | null
+  date: string
+  time: string | null
+  isRecurringYearly: boolean
+  calendarPersonId: number | null
+  calendarPersonName: string | null
 }

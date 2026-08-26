@@ -26,6 +26,7 @@ import { ChangePasswordPage } from './pages/ChangePasswordPage'
 import { WhatsAppConnectionsPage } from './pages/WhatsAppConnectionsPage'
 import { UsersList } from './pages/UsersList'
 import { UserForm } from './pages/UserForm'
+import { CalendarApp } from './pages/calendar/CalendarApp'
 import './App.css'
 
 export default function App() {
@@ -33,16 +34,19 @@ export default function App() {
   const [username, setUsername] = useState<string>(() => localStorage.getItem('bot_user') ?? 'admin')
   const [isAdmin, setIsAdmin] = useState<boolean>(() => localStorage.getItem('bot_is_admin') === 'true')
   const [userTitle, setUserTitle] = useState<string | null>(() => localStorage.getItem('bot_user_title') ?? null)
+  const [isCalendarUser, setIsCalendarUser] = useState<boolean>(() => localStorage.getItem('bot_is_calendar_user') === 'true')
 
   const applyLoginResponse = (response: LoginResponse) => {
     localStorage.setItem('bot_jwt', response.token)
     localStorage.setItem('bot_user', response.username)
     localStorage.setItem('bot_is_admin', response.isAdmin ? 'true' : 'false')
     localStorage.setItem('bot_user_title', response.userTitle ?? '')
+    localStorage.setItem('bot_is_calendar_user', response.isCalendarUser ? 'true' : 'false')
     setToken(response.token)
     setUsername(response.username)
     setIsAdmin(response.isAdmin)
     setUserTitle(response.userTitle)
+    setIsCalendarUser(response.isCalendarUser)
   }
 
   const handleLoginSuccess = (response: LoginResponse) => {
@@ -54,9 +58,11 @@ export default function App() {
     localStorage.removeItem('bot_user')
     localStorage.removeItem('bot_is_admin')
     localStorage.removeItem('bot_user_title')
+    localStorage.removeItem('bot_is_calendar_user')
     setToken(null)
     setIsAdmin(false)
     setUserTitle(null)
+    setIsCalendarUser(false)
   }
 
   useEffect(() => {
@@ -64,6 +70,7 @@ export default function App() {
       setToken(null)
       setIsAdmin(false)
       setUserTitle(null)
+      setIsCalendarUser(false)
     }
 
     window.addEventListener('auth-expired', onAuthExpired)
@@ -74,6 +81,12 @@ export default function App() {
 
   if (!token) {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />
+  }
+
+  // Usuário de Calendário: uma plataforma completamente separada dentro do mesmo login —
+  // nunca vê a navegação/rotas do botzap abaixo.
+  if (isCalendarUser) {
+    return <CalendarApp username={username} onLogout={handleLogout} />
   }
 
   return (

@@ -10,6 +10,11 @@ public class User
 
     public bool IsActive { get; set; } = true;
 
+    // Quando marcado, o usuário deixa de ver o sistema botzap inteiramente — o frontend abre
+    // direto no módulo de calendário (pessoas + lembretes), que é uma lista compartilhada entre
+    // todos os usuários com essa flag, sem relação com Contato/Turma/OwnerUserId.
+    public bool IsCalendarUser { get; set; }
+
     [Required]
     [MaxLength(80)]
     public string Username { get; set; } = string.Empty;

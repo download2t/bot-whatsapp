@@ -32,7 +32,7 @@ public class UsersController(AppDbContext dbContext) : ControllerBase
 
         var users = await dbContext.Users
             .OrderByDescending(user => user.CreatedAtUtc)
-            .Select(user => new UserListResponse(user.Id, user.Username, user.IsAdmin, user.IsActive, user.Email, user.Phone, user.FullName, user.CreatedAtUtc))
+            .Select(user => new UserListResponse(user.Id, user.Username, user.IsAdmin, user.IsActive, user.Email, user.Phone, user.FullName, user.CreatedAtUtc, user.IsCalendarUser))
             .ToListAsync(cancellationToken);
 
         return Ok(users);
@@ -84,6 +84,7 @@ public class UsersController(AppDbContext dbContext) : ControllerBase
         {
             IsAdmin = request.IsAdmin == true,
             IsActive = request.IsActive ?? true,
+            IsCalendarUser = request.IsCalendarUser == true,
             Username = username,
             Email = request.Email?.Trim(),
             Phone = request.Phone?.Trim(),
@@ -142,6 +143,7 @@ public class UsersController(AppDbContext dbContext) : ControllerBase
         user.FullName = request.FullName?.Trim();
         user.IsAdmin = request.IsAdmin == true;
         user.IsActive = request.IsActive ?? user.IsActive;
+        user.IsCalendarUser = request.IsCalendarUser ?? user.IsCalendarUser;
         user.Title = request.Title?.Trim();
         user.Notes = request.Notes?.Trim();
         user.UpdatedAtUtc = DateTime.UtcNow;
@@ -172,5 +174,5 @@ public class UsersController(AppDbContext dbContext) : ControllerBase
     }
 
     private static UserProfileResponse ToProfileResponse(User user) =>
-        new(user.Id, user.Username, user.IsAdmin, user.IsActive, user.Email, user.Phone, user.Cpf, user.FullName, user.Title, user.Notes, user.CreatedAtUtc);
+        new(user.Id, user.Username, user.IsAdmin, user.IsActive, user.Email, user.Phone, user.Cpf, user.FullName, user.Title, user.Notes, user.CreatedAtUtc, user.IsCalendarUser);
 }

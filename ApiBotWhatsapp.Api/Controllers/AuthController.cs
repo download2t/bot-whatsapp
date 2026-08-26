@@ -74,7 +74,7 @@ public class AuthController(AppDbContext dbContext, JwtTokenService tokenService
         }
 
         var (token, expiresAtUtc) = tokenService.GenerateToken(user);
-        return Ok(new LoginResponse(token, expiresAtUtc, user.Username, user.IsAdmin, user.Title));
+        return Ok(new LoginResponse(token, expiresAtUtc, user.Username, user.IsAdmin, user.Title, user.IsCalendarUser));
     }
 
     [HttpGet("me")]
@@ -155,7 +155,7 @@ public class AuthController(AppDbContext dbContext, JwtTokenService tokenService
     }
 
     private static UserProfileResponse ToProfileResponse(User user) =>
-        new(user.Id, user.Username, user.IsAdmin, user.IsActive, user.Email, user.Phone, user.Cpf, user.FullName, user.Title, user.Notes, user.CreatedAtUtc);
+        new(user.Id, user.Username, user.IsAdmin, user.IsActive, user.Email, user.Phone, user.Cpf, user.FullName, user.Title, user.Notes, user.CreatedAtUtc, user.IsCalendarUser);
 
     private async Task<User?> GetCurrentUserAsync(CancellationToken cancellationToken)
     {

@@ -26,7 +26,8 @@ public class JwtTokenService(IConfiguration configuration)
             new(JwtRegisteredClaimNames.UniqueName, user.Username),
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(ClaimTypes.Name, user.Username),
-            new("is_admin", user.IsAdmin ? "true" : "false")
+            new("is_admin", user.IsAdmin ? "true" : "false"),
+            new("is_calendar_user", user.IsCalendarUser ? "true" : "false")
         };
 
         var token = new JwtSecurityToken(

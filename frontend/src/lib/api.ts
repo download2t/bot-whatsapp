@@ -31,6 +31,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     localStorage.removeItem('bot_jwt')
     localStorage.removeItem('bot_user')
     localStorage.removeItem('bot_is_admin')
+    localStorage.removeItem('bot_is_calendar_user')
     window.dispatchEvent(new Event('auth-expired'))
     throw new Error('Sessao expirada. Faca login novamente.')
   }

@@ -23,7 +23,8 @@ export function UserForm() {
     fullName: '',
     title: '',
     isAdmin: false,
-    isActive: true
+    isActive: true,
+    isCalendarUser: false
   })
 
   const isEditingSelf = !isNew && form.username !== '' && form.username === localStorage.getItem('bot_user')
@@ -47,7 +48,8 @@ export function UserForm() {
         fullName: data.fullName || '',
         title: data.title || '',
         isAdmin: data.isAdmin === true,
-        isActive: data.isActive !== false
+        isActive: data.isActive !== false,
+        isCalendarUser: data.isCalendarUser === true
       })
       setError(null)
     } catch (err) {
@@ -85,7 +87,8 @@ export function UserForm() {
             fullName: form.fullName.trim() || null,
             title: form.title || null,
             isAdmin: isCurrentUserAdmin ? form.isAdmin : false,
-            isActive: isCurrentUserAdmin ? form.isActive : true
+            isActive: isCurrentUserAdmin ? form.isActive : true,
+            isCalendarUser: isCurrentUserAdmin ? form.isCalendarUser : false
           })
         })
         alert('Usuário criado com sucesso')
@@ -100,7 +103,8 @@ export function UserForm() {
             fullName: form.fullName.trim() || null,
             title: form.title || null,
             isAdmin: isCurrentUserAdmin ? form.isAdmin : undefined,
-            isActive: isCurrentUserAdmin ? (isEditingSelf ? true : form.isActive) : undefined
+            isActive: isCurrentUserAdmin ? (isEditingSelf ? true : form.isActive) : undefined,
+            isCalendarUser: isCurrentUserAdmin ? form.isCalendarUser : undefined
           })
         })
         alert('Usuário atualizado com sucesso')
@@ -225,6 +229,23 @@ export function UserForm() {
                 Você não pode desativar sua própria conta.
               </small>
             )}
+          </div>
+        )}
+
+        {isCurrentUserAdmin && (
+          <div className="form-group checkbox-row">
+            <label>
+              <input
+                type="checkbox"
+                checked={form.isCalendarUser}
+                onChange={(e) => setForm({ ...form, isCalendarUser: e.target.checked })}
+              />
+              Usuário de Calendário
+            </label>
+            <small style={{ display: 'block', color: '#888', marginTop: '4px' }}>
+              Marcando isso, o usuário deixa de ver o sistema Botzap: ao entrar, cai direto na
+              plataforma de calendário (pessoas + lembretes), separada e focada em mobile.
+            </small>
           </div>
         )}
 

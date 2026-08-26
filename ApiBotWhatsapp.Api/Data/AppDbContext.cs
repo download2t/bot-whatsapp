@@ -18,6 +18,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<ChatFlowOption> ChatFlowOptions => Set<ChatFlowOption>();
     public DbSet<ChatFlowConversation> ChatFlowConversations => Set<ChatFlowConversation>();
     public DbSet<ConversationState> ConversationStates => Set<ConversationState>();
+    public DbSet<CalendarPerson> CalendarPeople => Set<CalendarPerson>();
+    public DbSet<CalendarReminder> CalendarReminders => Set<CalendarReminder>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -106,6 +108,20 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<ConversationState>()
             .HasIndex(s => new { s.OwnerUserId, s.PhoneNumber })
             .IsUnique();
+
+        modelBuilder.Entity<CalendarPerson>()
+            .HasIndex(p => p.Name);
+
+        modelBuilder.Entity<CalendarReminder>()
+            .HasIndex(r => r.Date);
+
+        // Restrict, not Cascade: deleting a person must not wipe out reminders that reference
+        // them — just detach (CalendarPersonId becomes null) so the reminder itself survives.
+        modelBuilder.Entity<CalendarReminder>()
+            .HasOne(r => r.CalendarPerson)
+            .WithMany()
+            .HasForeignKey(r => r.CalendarPersonId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         base.OnModelCreating(modelBuilder);
     }

@@ -104,6 +104,7 @@ export function UsersList() {
                 <th>Email</th>
                 <th>Telefone</th>
                 <th>Nome Completo</th>
+                <th>Tipo</th>
                 <th>Status</th>
                 <th>Data de Cadastro</th>
                 <th>Ações</th>
@@ -116,6 +117,13 @@ export function UsersList() {
                   <td>{user.email || '-'}</td>
                   <td>{user.phone || '-'}</td>
                   <td>{user.fullName || '-'}</td>
+                  <td>
+                    {user.isCalendarUser ? (
+                      <Badge variant="info">Calendário</Badge>
+                    ) : (
+                      <Badge variant="success">Botzap</Badge>
+                    )}
+                  </td>
                   <td>
                     <div className="status-cell">
                       <Badge variant={user.isActive ? 'success' : 'danger'}>
