@@ -194,7 +194,7 @@ public class AutoReplyService(
                 return continuedFlowResponse;
             }
 
-            var currentTime = GetCurrentBrasiliaTime(configuration["WhatsApp:TimeZoneId"]);
+            var currentTime = TimeZoneHelper.GetCurrentLocalTime(configuration);
             var matchedRule = await dbContext.ScheduleRules
                 .Where(rule => rule.OwnerUserId == ownerUserId && rule.IsEnabled)
                 .OrderBy(rule => rule.StartTime)
@@ -448,28 +448,6 @@ public class AutoReplyService(
         catch
         {
             return [];
-        }
-    }
-
-    private static DateTime GetCurrentBrasiliaTime(string? configuredTimeZoneId)
-    {
-        configuredTimeZoneId = string.IsNullOrWhiteSpace(configuredTimeZoneId)
-            ? "E. South America Standard Time"
-            : configuredTimeZoneId;
-
-        try
-        {
-            var timezone = TimeZoneInfo.FindSystemTimeZoneById(configuredTimeZoneId);
-            var localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, timezone);
-            return localNow;
-        }
-        catch (TimeZoneNotFoundException)
-        {
-            return DateTime.Now;
-        }
-        catch (InvalidTimeZoneException)
-        {
-            return DateTime.Now;
         }
     }
 

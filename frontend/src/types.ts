@@ -230,3 +230,22 @@ export type CalendarReminder = {
   calendarPersonId: number | null
   calendarPersonName: string | null
 }
+
+// Config (por usuário) de aviso automático de aniversário — ver CalendarNotificationSettings.
+export type CalendarNotificationSetting = {
+  isEnabled: boolean
+  targetPhoneNumber: string | null
+  messageTemplate: string | null
+  notifyHour: number
+  notifyMinute: number
+  whatsAppConnected: boolean
+}
+
+export type CalendarNotificationLog = {
+  id: number
+  personName: string
+  notificationDate: string
+  sentAtUtc: string
+  success: boolean
+  statusDetail: string | null
+}

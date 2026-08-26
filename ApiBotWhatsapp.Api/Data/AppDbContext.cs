@@ -20,6 +20,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<ConversationState> ConversationStates => Set<ConversationState>();
     public DbSet<CalendarPerson> CalendarPeople => Set<CalendarPerson>();
     public DbSet<CalendarReminder> CalendarReminders => Set<CalendarReminder>();
+    public DbSet<CalendarBirthdayNotificationSetting> CalendarBirthdayNotificationSettings => Set<CalendarBirthdayNotificationSetting>();
+    public DbSet<CalendarBirthdayNotificationLog> CalendarBirthdayNotificationLogs => Set<CalendarBirthdayNotificationLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -121,6 +123,25 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .HasOne(r => r.CalendarPerson)
             .WithMany()
             .HasForeignKey(r => r.CalendarPersonId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<CalendarBirthdayNotificationSetting>()
+            .HasIndex(s => s.OwnerUserId)
+            .IsUnique();
+
+        // Dedupe key for CalendarBirthdayNotifierService: guarantees the same person can't be
+        // notified twice for the same user on the same day, regardless of how often the
+        // background tick runs or whether the process restarted mid-day.
+        modelBuilder.Entity<CalendarBirthdayNotificationLog>()
+            .HasIndex(l => new { l.OwnerUserId, l.CalendarPersonId, l.NotificationDate })
+            .IsUnique();
+
+        // SetNull, not Restrict: a notification log is a historical audit record (it keeps its
+        // own PersonName snapshot) — deleting a person must never be blocked by old logs.
+        modelBuilder.Entity<CalendarBirthdayNotificationLog>()
+            .HasOne(l => l.CalendarPerson)
+            .WithMany()
+            .HasForeignKey(l => l.CalendarPersonId)
             .OnDelete(DeleteBehavior.SetNull);
 
         base.OnModelCreating(modelBuilder);

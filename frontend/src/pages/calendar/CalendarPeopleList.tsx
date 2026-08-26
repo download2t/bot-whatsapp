@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiFetch } from '../../lib/api'
 import type { CalendarPerson } from '../../types'
+import { useCalendarPaths } from './calendarPaths'
 
 export function CalendarPeopleList() {
   const navigate = useNavigate()
+  const paths = useCalendarPaths()
   const [people, setPeople] = useState<CalendarPerson[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
@@ -54,7 +56,7 @@ export function CalendarPeopleList() {
         <div className="cal-empty">Nenhuma pessoa encontrada.</div>
       ) : (
         people.map((person) => (
-          <div key={person.id} className="cal-person-card" onClick={() => navigate(`/pessoas/${person.id}/editar`)}>
+          <div key={person.id} className="cal-person-card" onClick={() => navigate(paths.editPerson(person.id))}>
             <div>
               <div className="cal-person-name">{person.name}</div>
               <div className="cal-person-meta">
@@ -69,7 +71,7 @@ export function CalendarPeopleList() {
 
       <button
         className="cal-fab"
-        onClick={() => navigate('/pessoas/nova')}
+        onClick={() => navigate(paths.newPerson)}
         aria-label="Nova pessoa"
       >
         +

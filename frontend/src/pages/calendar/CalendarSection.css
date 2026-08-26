@@ -1,0 +1,64 @@
+/* Overrides for mounting the calendar screens INSIDE the normal Botzap layout (see
+   CalendarSection.tsx) — same cal-* classes from CalendarApp.css, just without the
+   full-viewport phone shell (no fixed bottom tabbar, no forced 480px width). */
+
+.cal-embedded {
+  /* CalendarApp.css's rules (day grid, events, forms...) read these custom properties, which
+     are normally only defined on .cal-shell (the standalone phone shell). Redeclared here so
+     the exact same classes resolve correctly when mounted inside the Botzap layout instead. */
+  --cal-bg: #f4f5f7;
+  --cal-surface: #ffffff;
+  --cal-border: #e2e4ea;
+  --cal-text: #1f2430;
+  --cal-muted: #7a8092;
+  --cal-primary: #4f6df5;
+  --cal-primary-dark: #3c56d6;
+  --cal-danger: #e0505a;
+
+  max-width: 640px;
+  margin: 1.5rem auto;
+  padding: 0 1rem;
+  color: var(--cal-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+.cal-section-nav {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--cal-border, #e2e4ea);
+  margin-bottom: 1rem;
+}
+
+.cal-section-tab {
+  padding: 0.6rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--cal-muted, #7a8092);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+}
+
+.cal-section-tab.active {
+  color: var(--cal-primary, #4f6df5);
+  border-bottom-color: var(--cal-primary, #4f6df5);
+}
+
+.cal-embedded-body {
+  position: relative;
+  min-height: 60vh;
+  padding-bottom: 3rem;
+}
+
+/* The FAB assumes a centered ~480px phone viewport (see CalendarApp.css); here it just
+   anchors to the bottom-right of this section's own content column instead. */
+.cal-embedded-body .cal-fab {
+  position: absolute;
+  left: auto;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  transform: none;
+}
+
+.cal-embedded-body .cal-tabbar {
+  display: none;
+}

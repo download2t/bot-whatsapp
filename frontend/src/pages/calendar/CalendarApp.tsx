@@ -3,6 +3,8 @@ import { CalendarHome } from './CalendarHome'
 import { CalendarPeopleList } from './CalendarPeopleList'
 import { CalendarPersonForm } from './CalendarPersonForm'
 import { CalendarReminderForm } from './CalendarReminderForm'
+import { CalendarNotificationSettings } from './CalendarNotificationSettings'
+import { CalendarBasePathContext } from './calendarPaths'
 import './CalendarApp.css'
 
 type CalendarAppProps = {
@@ -14,6 +16,7 @@ function TabBar() {
   const location = useLocation()
   const isHome = location.pathname === '/'
   const isPeople = location.pathname.startsWith('/pessoas')
+  const isNotifications = location.pathname.startsWith('/notificacoes')
 
   return (
     <nav className="cal-tabbar">
@@ -24,6 +27,10 @@ function TabBar() {
       <Link to="/pessoas" className={`cal-tab ${isPeople ? 'active' : ''}`}>
         <span className="cal-tab-icon">👥</span>
         Pessoas
+      </Link>
+      <Link to="/notificacoes" className={`cal-tab ${isNotifications ? 'active' : ''}`}>
+        <span className="cal-tab-icon">🔔</span>
+        Avisos
       </Link>
     </nav>
   )
@@ -43,15 +50,18 @@ export function CalendarApp({ username, onLogout }: CalendarAppProps) {
           </header>
 
           <div className="cal-content">
-            <Routes>
-              <Route path="/" element={<CalendarHome />} />
-              <Route path="/pessoas" element={<CalendarPeopleList />} />
-              <Route path="/pessoas/nova" element={<CalendarPersonForm />} />
-              <Route path="/pessoas/:id/editar" element={<CalendarPersonForm />} />
-              <Route path="/lembretes/novo" element={<CalendarReminderForm />} />
-              <Route path="/lembretes/:id/editar" element={<CalendarReminderForm />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
+            <CalendarBasePathContext.Provider value="">
+              <Routes>
+                <Route path="/" element={<CalendarHome />} />
+                <Route path="/pessoas" element={<CalendarPeopleList />} />
+                <Route path="/pessoas/nova" element={<CalendarPersonForm />} />
+                <Route path="/pessoas/:id/editar" element={<CalendarPersonForm />} />
+                <Route path="/lembretes/novo" element={<CalendarReminderForm />} />
+                <Route path="/lembretes/:id/editar" element={<CalendarReminderForm />} />
+                <Route path="/notificacoes" element={<CalendarNotificationSettings />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </CalendarBasePathContext.Provider>
           </div>
 
           <TabBar />

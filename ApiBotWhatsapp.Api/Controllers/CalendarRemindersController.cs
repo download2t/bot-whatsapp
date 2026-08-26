@@ -8,8 +8,9 @@ using Microsoft.EntityFrameworkCore;
 namespace ApiBotWhatsapp.Api.Controllers;
 
 // Shared reminders for the Calendário module (see CalendarReminder) — not scoped by
-// OwnerUserId. Birthdays aren't stored here; the frontend derives them live from
-// CalendarPeopleController for whatever month/range is being viewed.
+// OwnerUserId. Open to any authenticated user, same as CalendarPeopleController. Birthdays
+// aren't stored here; the frontend derives them live from CalendarPeopleController for
+// whatever month/range is being viewed.
 [ApiController]
 [Route("api/calendar/reminders")]
 public class CalendarRemindersController(AppDbContext dbContext) : ControllerBase
@@ -17,11 +18,6 @@ public class CalendarRemindersController(AppDbContext dbContext) : ControllerBas
     [HttpGet]
     public async Task<ActionResult<IEnumerable<CalendarReminderResponse>>> GetAll([FromQuery] DateOnly? from, [FromQuery] DateOnly? to, CancellationToken cancellationToken)
     {
-        if (!this.IsCalendarUser())
-        {
-            return Forbid();
-        }
-
         var query = dbContext.CalendarReminders.Include(r => r.CalendarPerson).AsQueryable();
         if (from is not null)
         {
@@ -46,11 +42,6 @@ public class CalendarRemindersController(AppDbContext dbContext) : ControllerBas
     [HttpGet("{id:int}")]
     public async Task<ActionResult<CalendarReminderResponse>> GetById(int id, CancellationToken cancellationToken)
     {
-        if (!this.IsCalendarUser())
-        {
-            return Forbid();
-        }
-
         var reminder = await dbContext.CalendarReminders.Include(r => r.CalendarPerson)
             .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
         if (reminder is null)
@@ -64,11 +55,6 @@ public class CalendarRemindersController(AppDbContext dbContext) : ControllerBas
     [HttpPost]
     public async Task<ActionResult<CalendarReminderResponse>> Create([FromBody] CalendarReminderRequest request, CancellationToken cancellationToken)
     {
-        if (!this.IsCalendarUser())
-        {
-            return Forbid();
-        }
-
         var title = request.Title?.Trim();
         if (string.IsNullOrWhiteSpace(title))
         {
@@ -100,11 +86,6 @@ public class CalendarRemindersController(AppDbContext dbContext) : ControllerBas
     [HttpPut("{id:int}")]
     public async Task<ActionResult<CalendarReminderResponse>> Update(int id, [FromBody] CalendarReminderRequest request, CancellationToken cancellationToken)
     {
-        if (!this.IsCalendarUser())
-        {
-            return Forbid();
-        }
-
         var entity = await dbContext.CalendarReminders.Include(r => r.CalendarPerson)
             .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
         if (entity is null)
@@ -136,11 +117,6 @@ public class CalendarRemindersController(AppDbContext dbContext) : ControllerBas
     [HttpDelete("{id:int}")]
     public async Task<ActionResult> Delete(int id, CancellationToken cancellationToken)
     {
-        if (!this.IsCalendarUser())
-        {
-            return Forbid();
-        }
-
         var entity = await dbContext.CalendarReminders.FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
         if (entity is null)
         {

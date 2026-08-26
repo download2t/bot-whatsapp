@@ -8,7 +8,9 @@ using Microsoft.EntityFrameworkCore;
 namespace ApiBotWhatsapp.Api.Controllers;
 
 // Shared address book for the Calendário module (see CalendarPerson) — not scoped by
-// OwnerUserId. Every action is gated on User.IsCalendarUser instead.
+// OwnerUserId. Open to any authenticated user (the [Authorize] fallback policy in Program.cs
+// already requires login) — every Botzap user gets a shortcut into this same shared list, not
+// just accounts with User.IsCalendarUser (that flag now only decides the calendar-only shell).
 [ApiController]
 [Route("api/calendar/people")]
 public class CalendarPeopleController(AppDbContext dbContext) : ControllerBase
@@ -16,11 +18,6 @@ public class CalendarPeopleController(AppDbContext dbContext) : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<CalendarPersonResponse>>> GetAll([FromQuery] string? name, CancellationToken cancellationToken)
     {
-        if (!this.IsCalendarUser())
-        {
-            return Forbid();
-        }
-
         var query = dbContext.CalendarPeople.AsQueryable();
         if (!string.IsNullOrWhiteSpace(name))
         {
@@ -38,11 +35,6 @@ public class CalendarPeopleController(AppDbContext dbContext) : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<ActionResult<CalendarPersonResponse>> GetById(int id, CancellationToken cancellationToken)
     {
-        if (!this.IsCalendarUser())
-        {
-            return Forbid();
-        }
-
         var person = await dbContext.CalendarPeople.FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
         if (person is null)
         {
@@ -55,11 +47,6 @@ public class CalendarPeopleController(AppDbContext dbContext) : ControllerBase
     [HttpPost]
     public async Task<ActionResult<CalendarPersonResponse>> Create([FromBody] CalendarPersonRequest request, CancellationToken cancellationToken)
     {
-        if (!this.IsCalendarUser())
-        {
-            return Forbid();
-        }
-
         var name = request.Name?.Trim();
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -86,11 +73,6 @@ public class CalendarPeopleController(AppDbContext dbContext) : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<ActionResult<CalendarPersonResponse>> Update(int id, [FromBody] CalendarPersonRequest request, CancellationToken cancellationToken)
     {
-        if (!this.IsCalendarUser())
-        {
-            return Forbid();
-        }
-
         var entity = await dbContext.CalendarPeople.FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
         if (entity is null)
         {
@@ -118,11 +100,6 @@ public class CalendarPeopleController(AppDbContext dbContext) : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<ActionResult> Delete(int id, CancellationToken cancellationToken)
     {
-        if (!this.IsCalendarUser())
-        {
-            return Forbid();
-        }
-
         var entity = await dbContext.CalendarPeople.FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
         if (entity is null)
         {

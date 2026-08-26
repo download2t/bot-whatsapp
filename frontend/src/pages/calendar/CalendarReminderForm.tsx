@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { apiFetch } from '../../lib/api'
 import type { CalendarPerson, CalendarReminder } from '../../types'
+import { useCalendarPaths } from './calendarPaths'
 
 export function CalendarReminderForm() {
   const { id } = useParams()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+  const paths = useCalendarPaths()
   const isNew = !id
 
   const [loading, setLoading] = useState(!isNew)
@@ -95,7 +97,7 @@ export function CalendarReminderForm() {
         await apiFetch(`/api/calendar/reminders/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
       }
 
-      navigate('/')
+      navigate(paths.home)
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Falha ao salvar lembrete')
     } finally {
@@ -109,7 +111,7 @@ export function CalendarReminderForm() {
 
     try {
       await apiFetch(`/api/calendar/reminders/${id}`, { method: 'DELETE' })
-      navigate('/')
+      navigate(paths.home)
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Falha ao excluir lembrete')
     }
@@ -119,7 +121,7 @@ export function CalendarReminderForm() {
 
   return (
     <div>
-      <a className="cal-back-link" onClick={() => navigate('/')}>‹ Calendário</a>
+      <a className="cal-back-link" onClick={() => navigate(paths.home)}>‹ Calendário</a>
       <h2 className="cal-page-title">{isNew ? 'Novo lembrete' : 'Editar lembrete'}</h2>
 
       {error && <div className="cal-error">{error}</div>}
@@ -212,7 +214,7 @@ export function CalendarReminderForm() {
           <button type="submit" className="cal-btn cal-btn-primary" disabled={saving}>
             {saving ? 'Salvando...' : 'Salvar'}
           </button>
-          <button type="button" className="cal-btn cal-btn-secondary" onClick={() => navigate('/')}>
+          <button type="button" className="cal-btn cal-btn-secondary" onClick={() => navigate(paths.home)}>
             Cancelar
           </button>
         </div>

@@ -216,6 +216,17 @@ export function Navigation({
               Histórico de Envios
             </button>
           </li>
+          <li className="nav-item">
+            <button
+              className="nav-trigger"
+              onClick={() => {
+                navigate("/calendario");
+                closeMenus();
+              }}
+            >
+              📅 Calendário
+            </button>
+          </li>
           {isAdmin && (
             <li className="nav-item">
               <button

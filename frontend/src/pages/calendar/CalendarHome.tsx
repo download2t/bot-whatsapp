@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiFetch } from '../../lib/api'
 import type { CalendarPerson, CalendarReminder } from '../../types'
+import { useCalendarPaths } from './calendarPaths'
 
 const WEEKDAYS = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']
 
@@ -32,6 +33,7 @@ function buildMonthGrid(monthStart: Date): Date[] {
 
 export function CalendarHome() {
   const navigate = useNavigate()
+  const paths = useCalendarPaths()
   const today = useMemo(() => new Date(), [])
   const [monthStart, setMonthStart] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1))
   const [selectedDate, setSelectedDate] = useState(() => new Date())
@@ -193,7 +195,7 @@ export function CalendarHome() {
             })}
 
             {dayReminders.map((reminder) => (
-              <div key={`r-${reminder.id}`} className="cal-event reminder" onClick={() => navigate(`/lembretes/${reminder.id}/editar`)}>
+              <div key={`r-${reminder.id}`} className="cal-event reminder" onClick={() => navigate(paths.editReminder(reminder.id))}>
                 <span className="cal-event-icon">🔔</span>
                 <div className="cal-event-body">
                   <div className="cal-event-title">{reminder.title}</div>
@@ -210,7 +212,7 @@ export function CalendarHome() {
 
       <button
         className="cal-fab"
-        onClick={() => navigate(`/lembretes/novo?data=${selectedIso}`)}
+        onClick={() => navigate(paths.newReminder(selectedIso))}
         aria-label="Novo lembrete"
       >
         +

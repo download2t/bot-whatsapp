@@ -35,6 +35,7 @@ builder.Services.AddScoped<MediaStorageService>();
 builder.Services.AddScoped<ChatFlowService>();
 builder.Services.AddScoped<ConversationInboxService>();
 builder.Services.AddSingleton<BulkCampaignRunner>();
+builder.Services.AddHostedService<CalendarBirthdayNotifierService>();
 
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var signingKey = jwtSection["SigningKey"]

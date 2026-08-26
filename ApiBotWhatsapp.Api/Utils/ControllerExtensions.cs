@@ -16,16 +16,6 @@ public static class ControllerExtensions
     }
 
     /// <summary>
-    /// Whether the authenticated user has the Calendário flag, from the "is_calendar_user"
-    /// claim issued by JwtTokenService. Gates the /api/calendar/* endpoints, which are a
-    /// separate, shared-across-users module unrelated to the WhatsApp data above.
-    /// </summary>
-    public static bool IsCalendarUser(this ControllerBase controller)
-    {
-        return string.Equals(controller.User.FindFirst("is_calendar_user")?.Value, "true", StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>
     /// Whether the authenticated user is an admin, from the "is_admin" claim. Mirrors the
     /// check UsersController already did locally; centralized here so new controllers reuse it.
     /// </summary>

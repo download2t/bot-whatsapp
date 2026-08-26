@@ -27,6 +27,7 @@ import { WhatsAppConnectionsPage } from './pages/WhatsAppConnectionsPage'
 import { UsersList } from './pages/UsersList'
 import { UserForm } from './pages/UserForm'
 import { CalendarApp } from './pages/calendar/CalendarApp'
+import { CalendarSection } from './pages/calendar/CalendarSection'
 import './App.css'
 
 export default function App() {
@@ -124,6 +125,7 @@ export default function App() {
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/change-password" element={<ChangePasswordPage />} />
         <Route path="/whatsapp-connections" element={<WhatsAppConnectionsPage />} />
+        <Route path="/calendario/*" element={<CalendarSection />} />
         <Route path="/users" element={isAdmin ? <UsersList /> : <Navigate to="/" replace />} />
         <Route path="/users/new" element={isAdmin ? <UserForm /> : <Navigate to="/" replace />} />
         <Route path="/users/:id/edit" element={isAdmin ? <UserForm /> : <Navigate to="/" replace />} />

@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { apiFetch } from '../../lib/api'
 import type { CalendarPerson } from '../../types'
+import { useCalendarPaths } from './calendarPaths'
 
 export function CalendarPersonForm() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const paths = useCalendarPaths()
   const isNew = !id
 
   const [loading, setLoading] = useState(!isNew)
@@ -73,7 +75,7 @@ export function CalendarPersonForm() {
         await apiFetch(`/api/calendar/people/${id}`, { method: 'PUT', body: JSON.stringify(payload) })
       }
 
-      navigate('/pessoas')
+      navigate(paths.people)
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Falha ao salvar pessoa')
     } finally {
@@ -87,7 +89,7 @@ export function CalendarPersonForm() {
 
     try {
       await apiFetch(`/api/calendar/people/${id}`, { method: 'DELETE' })
-      navigate('/pessoas')
+      navigate(paths.people)
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Falha ao excluir pessoa')
     }
@@ -97,7 +99,7 @@ export function CalendarPersonForm() {
 
   return (
     <div>
-      <a className="cal-back-link" onClick={() => navigate('/pessoas')}>‹ Pessoas</a>
+      <a className="cal-back-link" onClick={() => navigate(paths.people)}>‹ Pessoas</a>
       <h2 className="cal-page-title">{isNew ? 'Nova pessoa' : 'Editar pessoa'}</h2>
 
       {error && <div className="cal-error">{error}</div>}
@@ -165,7 +167,7 @@ export function CalendarPersonForm() {
           <button type="submit" className="cal-btn cal-btn-primary" disabled={saving}>
             {saving ? 'Salvando...' : 'Salvar'}
           </button>
-          <button type="button" className="cal-btn cal-btn-secondary" onClick={() => navigate('/pessoas')}>
+          <button type="button" className="cal-btn cal-btn-secondary" onClick={() => navigate(paths.people)}>
             Cancelar
           </button>
         </div>
