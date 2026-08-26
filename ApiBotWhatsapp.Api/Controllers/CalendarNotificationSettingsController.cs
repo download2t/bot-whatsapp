@@ -13,7 +13,7 @@ namespace ApiBotWhatsapp.Api.Controllers;
 // own connected WhatsApp session.
 [ApiController]
 [Route("api/calendar/notification-settings")]
-public class CalendarNotificationSettingsController(AppDbContext dbContext, WhatsAppBridgeClient bridgeClient) : ControllerBase
+public class CalendarNotificationSettingsController(AppDbContext dbContext, WhatsAppBridgeClient bridgeClient, WhatsAppMessageSender messageSender) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<CalendarBirthdayNotificationSettingResponse>> Get(CancellationToken cancellationToken)
@@ -80,6 +80,33 @@ public class CalendarNotificationSettingsController(AppDbContext dbContext, What
             setting.NotifyHour,
             setting.NotifyMinute,
             status.IsConnected));
+    }
+
+    // Manual test send — lets the user confirm the number/WhatsApp connection actually works
+    // before relying on the automatic daily check. Uses sample data (not a real CalendarPerson),
+    // is not gated by IsEnabled/NotifyHour, and is never written to CalendarBirthdayNotificationLog
+    // (that log is reserved for real automatic dispatches, not manual tests).
+    [HttpPost("test")]
+    public async Task<ActionResult<CalendarBirthdayNotificationTestResponse>> SendTest([FromBody] CalendarBirthdayNotificationTestRequest request, CancellationToken cancellationToken)
+    {
+        var ownerUserId = this.GetCurrentUserId();
+
+        var normalizedPhone = PhoneNumberUtils.Normalize(request.TargetPhoneNumber);
+        if (string.IsNullOrWhiteSpace(normalizedPhone))
+        {
+            return BadRequest("Informe um número para o teste.");
+        }
+
+        var text = "[TESTE] " + CalendarBirthdayNotifierService.BuildMessage(request.MessageTemplate, "Fulano de Tal", 30);
+
+        var result = await messageSender.SendMessageAsync(
+            normalizedPhone,
+            text,
+            markAsUnread: false,
+            senderSessionId: $"user-{ownerUserId}",
+            cancellationToken);
+
+        return Ok(new CalendarBirthdayNotificationTestResponse(result.Success, result.Status));
     }
 
     [HttpGet("log")]

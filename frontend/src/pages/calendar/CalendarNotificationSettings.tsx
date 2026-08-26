@@ -8,6 +8,8 @@ const DEFAULT_TEMPLATE_HINT =
 export function CalendarNotificationSettings() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ success: boolean; status: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [whatsAppConnected, setWhatsAppConnected] = useState(false)
   const [logs, setLogs] = useState<CalendarNotificationLog[]>([])
@@ -75,6 +77,30 @@ export function CalendarNotificationSettings() {
       alert(err instanceof Error ? err.message : 'Falha ao salvar configuração')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleTest = async () => {
+    if (!form.targetPhoneNumber.trim()) {
+      alert('Informe o número antes de testar')
+      return
+    }
+
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const result = await apiFetch<{ success: boolean; status: string }>('/api/calendar/notification-settings/test', {
+        method: 'POST',
+        body: JSON.stringify({
+          targetPhoneNumber: form.targetPhoneNumber.trim(),
+          messageTemplate: form.messageTemplate.trim() || null,
+        }),
+      })
+      setTestResult(result)
+    } catch (err) {
+      setTestResult({ success: false, status: err instanceof Error ? err.message : 'Falha ao enviar teste' })
+    } finally {
+      setTesting(false)
     }
   }
 
@@ -146,7 +172,27 @@ export function CalendarNotificationSettings() {
           <button type="submit" className="cal-btn cal-btn-primary" disabled={saving}>
             {saving ? 'Salvando...' : 'Salvar'}
           </button>
+          <button
+            type="button"
+            className="cal-btn cal-btn-secondary"
+            disabled={testing}
+            onClick={handleTest}
+          >
+            {testing ? 'Enviando...' : '🧪 Testar envio'}
+          </button>
         </div>
+
+        {testResult && (
+          <div className={testResult.success ? 'cal-event birthday' : 'cal-event reminder'}>
+            <span className="cal-event-icon">{testResult.success ? '✅' : '⚠️'}</span>
+            <div className="cal-event-body">
+              <div className="cal-event-title">
+                {testResult.success ? 'Mensagem de teste enviada' : 'Falha ao enviar teste'}
+              </div>
+              <div className="cal-event-meta">{testResult.status}</div>
+            </div>
+          </div>
+        )}
       </form>
 
       <div className="cal-agenda">

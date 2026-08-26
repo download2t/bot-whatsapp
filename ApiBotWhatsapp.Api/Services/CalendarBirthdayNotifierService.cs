@@ -16,8 +16,16 @@ public class CalendarBirthdayNotifierService(
 {
     private static readonly TimeSpan TickInterval = TimeSpan.FromMinutes(5);
 
-    private const string DefaultMessageTemplate =
+    public const string DefaultMessageTemplate =
         "🎂 Hoje é aniversário de *{nome}*! Está completando {idade} anos. Prepare uma surpresa ou homenagem! 🎉";
+
+    // Shared with CalendarNotificationSettingsController's manual "send a test" endpoint, so a
+    // test message is built with the exact same {nome}/{idade} substitution as a real one.
+    public static string BuildMessage(string? template, string name, int age)
+    {
+        var effective = string.IsNullOrWhiteSpace(template) ? DefaultMessageTemplate : template;
+        return effective.Replace("{nome}", name).Replace("{idade}", age.ToString());
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -92,8 +100,7 @@ public class CalendarBirthdayNotifierService(
                 }
 
                 var age = today.Year - person.BirthDate!.Value.Year;
-                var template = string.IsNullOrWhiteSpace(setting.MessageTemplate) ? DefaultMessageTemplate : setting.MessageTemplate;
-                var text = template.Replace("{nome}", person.Name).Replace("{idade}", age.ToString());
+                var text = BuildMessage(setting.MessageTemplate, person.Name, age);
 
                 var result = await messageSender.SendMessageAsync(
                     setting.TargetPhoneNumber!,
