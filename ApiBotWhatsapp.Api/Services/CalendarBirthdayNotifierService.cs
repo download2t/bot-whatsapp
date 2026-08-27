@@ -16,6 +16,12 @@ public class CalendarBirthdayNotifierService(
 {
     private static readonly TimeSpan TickInterval = TimeSpan.FromMinutes(5);
 
+    // Small pause between back-to-back sends when more than one person shares a birthday —
+    // mirrors BulkCampaignRunner's IntervalSeconds pacing, so a rare multi-birthday day doesn't
+    // fire several messages to the same number in the same instant (which WhatsApp itself
+    // could flag as automated/spammy).
+    private static readonly TimeSpan BetweenSendsDelay = TimeSpan.FromSeconds(3);
+
     public const string DefaultMessageTemplate =
         "🎂 Hoje é aniversário de *{nome}*! Está completando {idade} anos. Prepare uma surpresa ou homenagem! 🎉";
 
@@ -88,6 +94,9 @@ public class CalendarBirthdayNotifierService(
                 continue;
             }
 
+            // Every person with a birthday today gets their own message and their own log row —
+            // sharing a day never merges them into one notice or causes one to be skipped.
+            var isFirstSendThisSetting = true;
             foreach (var person in birthdayPeople)
             {
                 var alreadySent = await dbContext.CalendarBirthdayNotificationLogs.AnyAsync(
@@ -98,6 +107,12 @@ public class CalendarBirthdayNotifierService(
                 {
                     continue;
                 }
+
+                if (!isFirstSendThisSetting)
+                {
+                    await Task.Delay(BetweenSendsDelay, cancellationToken);
+                }
+                isFirstSendThisSetting = false;
 
                 var age = today.Year - person.BirthDate!.Value.Year;
                 var text = BuildMessage(setting.MessageTemplate, person.Name, age);
@@ -120,6 +135,12 @@ public class CalendarBirthdayNotifierService(
                     StatusDetail = result.Status
                 });
 
+                // Persisted right away (not batched until the end of the whole run): if the
+                // process dies between sending to person A and person B, A's log row must
+                // already be durable — otherwise a restart would see no log for A and send it
+                // again, which is exactly the double-send this whole mechanism exists to avoid.
+                await dbContext.SaveChangesAsync(cancellationToken);
+
                 if (!result.Success)
                 {
                     logger.LogWarning(
@@ -128,7 +149,5 @@ public class CalendarBirthdayNotifierService(
                 }
             }
         }
-
-        await dbContext.SaveChangesAsync(cancellationToken);
     }
 }
