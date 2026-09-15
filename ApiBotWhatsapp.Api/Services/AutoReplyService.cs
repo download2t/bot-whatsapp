@@ -60,7 +60,7 @@ public class AutoReplyService(
                 }
             }
 
-            var brasiliaTime = GetBrasiliaTimeFromUtc(messageTimestampUtc, configuration["WhatsApp:TimeZoneId"]);
+            var brasiliaTime = TimeZoneHelper.ConvertUtcToLocal(messageTimestampUtc, configuration);
 
             // 1. Define a direção e o status baseado no que veio do Node.js
             var direction = !string.IsNullOrWhiteSpace(request.Direction) ? request.Direction : "Incoming";
@@ -92,7 +92,11 @@ public class AutoReplyService(
                 MediaFileName = incomingMediaUrl is not null ? request.MediaFileName : null,
                 IsAutomatic = false,
                 Status = status,
-                TimestampUtc = brasiliaTime,
+                // True UTC, not brasiliaTime — TimestampUtc must always hold UTC (the field
+                // name says so, and BulkCampaignRunner/BulkMessagesController already store it
+                // that way). brasiliaTime stays a local-only variable, used just below for
+                // schedule-window/day-of-week matching, which is where it actually belongs.
+                TimestampUtc = messageTimestampUtc,
                 MessageId = request.MessageId
             };
 
@@ -276,7 +280,9 @@ public class AutoReplyService(
                 IsAutomatic = true,
                 Status = dispatchResult.Status,
                 MessageId = dispatchResult.MessageId,
-                TimestampUtc = brasiliaTime
+                // True UTC (see the incomingLog comment above) — this is the moment we actually
+                // dispatched the auto-reply, not the incoming message's brasiliaTime.
+                TimestampUtc = DateTime.UtcNow
             };
 
             dbContext.MessageLogs.Add(outgoingLog);
@@ -451,24 +457,4 @@ public class AutoReplyService(
         }
     }
 
-    private static DateTime GetBrasiliaTimeFromUtc(DateTime utcTime, string? configuredTimeZoneId)
-    {
-        configuredTimeZoneId = string.IsNullOrWhiteSpace(configuredTimeZoneId)
-            ? "E. South America Standard Time"
-            : configuredTimeZoneId;
-
-        try
-        {
-            var timezone = TimeZoneInfo.FindSystemTimeZoneById(configuredTimeZoneId);
-            return TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcTime, DateTimeKind.Utc), timezone);
-        }
-        catch (TimeZoneNotFoundException)
-        {
-            return DateTime.SpecifyKind(utcTime, DateTimeKind.Utc).ToLocalTime();
-        }
-        catch (InvalidTimeZoneException)
-        {
-            return DateTime.SpecifyKind(utcTime, DateTimeKind.Utc).ToLocalTime();
-        }
-    }
 }

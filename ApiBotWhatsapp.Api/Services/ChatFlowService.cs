@@ -67,7 +67,7 @@ public class ChatFlowService(
             await dbContext.SaveChangesAsync(cancellationToken);
 
             var timeoutMessage = string.IsNullOrWhiteSpace(flow.TimeoutMessage) ? DefaultTimeoutMessage : flow.TimeoutMessage;
-            return await SendStepMessageAsync(timeoutMessage, ownerUserId, normalizedPhone, normalizedWhatsApp, brasiliaTime, cancellationToken);
+            return await SendStepMessageAsync(timeoutMessage, ownerUserId, normalizedPhone, normalizedWhatsApp, cancellationToken);
         }
 
         return await AdvanceConversationAsync(conversation, incomingMessage, ownerUserId, normalizedPhone, normalizedWhatsApp, brasiliaTime, cancellationToken);
@@ -120,7 +120,7 @@ public class ChatFlowService(
             await dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        return await SendStepMessageAsync(startStep.MessageText, ownerUserId, normalizedPhone, normalizedWhatsApp, brasiliaTime, cancellationToken);
+        return await SendStepMessageAsync(startStep.MessageText, ownerUserId, normalizedPhone, normalizedWhatsApp, cancellationToken);
     }
 
     private async Task<WhatsAppWebhookResponse> AdvanceConversationAsync(
@@ -154,7 +154,7 @@ public class ChatFlowService(
         {
             await dbContext.SaveChangesAsync(cancellationToken);
             var invalidMessage = currentStep.InvalidAnswerMessage ?? DefaultInvalidAnswerMessage;
-            return await SendStepMessageAsync(invalidMessage, ownerUserId, normalizedPhone, normalizedWhatsApp, brasiliaTime, cancellationToken);
+            return await SendStepMessageAsync(invalidMessage, ownerUserId, normalizedPhone, normalizedWhatsApp, cancellationToken);
         }
 
         var nextStep = await dbContext.ChatFlowSteps.FirstAsync(s => s.Id == matchedOption.NextStepId, cancellationToken);
@@ -170,7 +170,7 @@ public class ChatFlowService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return await SendStepMessageAsync(nextStep.MessageText, ownerUserId, normalizedPhone, normalizedWhatsApp, brasiliaTime, cancellationToken);
+        return await SendStepMessageAsync(nextStep.MessageText, ownerUserId, normalizedPhone, normalizedWhatsApp, cancellationToken);
     }
 
     // Mirrors how AutoReplyService sends+logs its own automatic replies, so /messages shows
@@ -181,7 +181,6 @@ public class ChatFlowService(
         int ownerUserId,
         string normalizedPhone,
         string normalizedWhatsApp,
-        DateTime brasiliaTime,
         CancellationToken cancellationToken)
     {
         var dispatchResult = await messageSender.SendMessageAsync(normalizedPhone, messageText, true, $"user-{ownerUserId}", cancellationToken);
@@ -199,7 +198,10 @@ public class ChatFlowService(
             IsAutomatic = true,
             Status = dispatchResult.Status,
             MessageId = dispatchResult.MessageId,
-            TimestampUtc = brasiliaTime,
+            // True UTC — TimestampUtc must always hold UTC, never a pre-converted local time
+            // (see the matching comment in AutoReplyService.cs). brasiliaTime here is only
+            // used by the caller for its own scheduling logic, not for this stored value.
+            TimestampUtc = DateTime.UtcNow,
         });
         await dbContext.SaveChangesAsync(cancellationToken);
         await conversationInbox.MarkPendingReviewAsync(ownerUserId, normalizedPhone, cancellationToken);

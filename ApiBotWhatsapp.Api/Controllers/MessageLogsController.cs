@@ -10,7 +10,7 @@ namespace ApiBotWhatsapp.Api.Controllers;
 
 [ApiController]
 [Route("api/messages")]
-public class MessageLogsController(AppDbContext dbContext, ConversationInboxService conversationInbox) : ControllerBase
+public class MessageLogsController(AppDbContext dbContext, ConversationInboxService conversationInbox, IConfiguration configuration) : ControllerBase
 {
     // Phone numbers whose conversation had an automatic message (rule text or chat-flow step)
     // sent since the operator last opened it in /messages — drives the "não lida" badge in the
@@ -153,7 +153,7 @@ public class MessageLogsController(AppDbContext dbContext, ConversationInboxServ
                 Csv(item.Content),
                 item.IsAutomatic ? "true" : "false",
                 Csv(item.Status),
-                item.TimestampUtc.ToString("yyyy-MM-dd HH:mm:ss")));
+                TimeZoneHelper.ConvertUtcToLocal(item.TimestampUtc, configuration).ToString("yyyy-MM-dd HH:mm:ss")));
         }
 
         var bytes = Encoding.UTF8.GetBytes(csv.ToString());

@@ -4,6 +4,7 @@ import { apiFetch } from '../lib/api'
 import type { BulkCampaign, BulkCampaignListItem, Contato, Turma } from '../types'
 import { Card, CardHeader, CardTitle, EmptyState } from '../components/UI'
 import { EmojiPicker } from '../components/EmojiPicker'
+import { formatBrazilDateTime, toBrazilWallClock } from '../lib/brazilTime'
 import './SimulacaoMensagem.css'
 
 type Mode = 'new' | 'history'
@@ -39,7 +40,7 @@ function nowHhMm(): string {
 
 function formatDateTime(value: string | null): string {
   if (!value) return '—'
-  return new Date(value).toLocaleString('pt-BR')
+  return formatBrazilDateTime(value) || '—'
 }
 
 export function SimulacaoMensagem() {
@@ -272,8 +273,8 @@ export function SimulacaoMensagem() {
   const resolveTimestamp = (contact: Contato, index: number): Date | null => {
     if (mode === 'history') {
       const iso = historyTimestamps[contact.id]
-      if (iso) return new Date(iso)
-      return campaignDetail ? new Date(campaignDetail.createdAtUtc) : null
+      if (iso) return toBrazilWallClock(iso)
+      return campaignDetail ? toBrazilWallClock(campaignDetail.createdAtUtc) : null
     }
     return timestampForIndex(index)
   }

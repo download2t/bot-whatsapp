@@ -3,13 +3,14 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
 import type { BulkCampaign, BulkCampaignItemStatus, BulkCampaignStatus } from '../types'
 import { Card, CardHeader, CardTitle, Badge, EmptyState } from '../components/UI'
+import { formatBrazilDateTime } from '../lib/brazilTime'
 import '../styles/modern.css'
 
 const POLL_INTERVAL_MS = 1500
 
 function formatDateTime(value: string | null): string {
   if (!value) return '—'
-  return new Date(value).toLocaleString('pt-BR')
+  return formatBrazilDateTime(value) || '—'
 }
 
 function getCampaignStatusLabel(status: BulkCampaignStatus): string {

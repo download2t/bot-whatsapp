@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../lib/api";
 import type { MessageLog } from "../types";
 import { dateKey, dateKeyLabel, formatExportLine, resolveSenderName } from "../lib/whatsappExport";
+import { brazilTimeMs } from "../lib/brazilTime";
 import "./Documentacao.css";
 
 export function Documentacao() {
@@ -54,7 +55,7 @@ export function Documentacao() {
   const phoneMessages = useMemo(() => {
     if (!selectedPhone) return [];
     return [...(conversations[selectedPhone] || [])].sort(
-      (a, b) => new Date(a.timestampUtc).getTime() - new Date(b.timestampUtc).getTime(),
+      (a, b) => brazilTimeMs(a.timestampUtc) - brazilTimeMs(b.timestampUtc),
     );
   }, [conversations, selectedPhone]);
 

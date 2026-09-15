@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
 import type { BulkCampaignListItem, BulkCampaignStatus } from '../types'
 import { Card, Badge, EmptyState } from '../components/UI'
+import { formatBrazilDateTime } from '../lib/brazilTime'
 import '../styles/modern.css'
 
 function formatDateTime(value: string | null): string {
   if (!value) return '—'
-  return new Date(value).toLocaleString('pt-BR')
+  return formatBrazilDateTime(value) || '—'
 }
 
 function getStatusLabel(status: BulkCampaignStatus): string {

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { apiFetch } from '../lib/api'
 import type { MessageLog, PagedMessageLog } from '../types'
 import { Card, EmptyState } from '../components/UI'
+import { formatBrazilDateTime } from '../lib/brazilTime'
 import '../styles/modern.css'
 
 // Local helpers - keeps this page self-contained instead of pulling in Documentacao's
@@ -13,7 +14,7 @@ function todayIsoDate(): string {
 }
 
 function formatDateTime(value: string): string {
-  return new Date(value).toLocaleString('pt-BR')
+  return formatBrazilDateTime(value)
 }
 
 export function AutomaticMessages() {

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { apiFetch, getApiBase } from "../lib/api";
 import type { MessageLog } from "../types";
 import { isOutgoingMessage as isOutgoingMessageShared, mediaFallbackText } from "../lib/whatsappExport";
+import { brazilTimeMs, formatBrazilDate, formatBrazilTime, isBrazilToday } from "../lib/brazilTime";
 import "./Messages.css";
 
 type FilterMode = "pending" | "all";
@@ -14,21 +15,14 @@ type ConversationRow = {
   isPending: boolean;
 };
 
-const safeGetTime = (dateStr: string | undefined | null) => {
-  if (!dateStr) return 0;
-  const time = new Date(dateStr).getTime();
-  return isNaN(time) ? 0 : time;
-};
-
-const isToday = (d: Date) => d.toDateString() === new Date().toDateString();
+const safeGetTime = brazilTimeMs;
 
 const safeFormatDateTime = (dateStr: string | undefined | null) => {
   if (!dateStr) return "";
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return "";
-  const time = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  if (isToday(d)) return time;
-  return `${d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })} ${time}`;
+  const time = formatBrazilTime(dateStr);
+  if (!time) return "";
+  if (isBrazilToday(dateStr)) return time;
+  return `${formatBrazilDate(dateStr, { day: "2-digit", month: "2-digit" })} ${time}`;
 };
 
 const safeRenderContent = (content: any) => {

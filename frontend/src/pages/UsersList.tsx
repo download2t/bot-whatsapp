@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
 import type { UserListItem } from '../types'
 import { Badge } from '../components/UI'
+import { formatBrazilDate } from '../lib/brazilTime'
 import '../styles/modern.css'
 import './UsersList.css'
 
@@ -69,14 +70,7 @@ export function UsersList() {
     }
   }
 
-  const formatBrazilTime = (utcDate: string): string => {
-    const date = new Date(utcDate)
-    const brazilDate = new Date(date.getTime() - 3 * 60 * 60 * 1000)
-    const day = String(brazilDate.getUTCDate()).padStart(2, '0')
-    const month = String(brazilDate.getUTCMonth() + 1).padStart(2, '0')
-    const year = brazilDate.getUTCFullYear()
-    return `${day}/${month}/${year}`
-  }
+  const formatBrazilTime = (utcDate: string): string => formatBrazilDate(utcDate)
 
   if (loading) return <div className="container"><div className="loading">Carregando usuários...</div></div>
   if (error) return <div className="container"><div className="error">{error}</div></div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../lib/api'
 import type { MessageLog, ScheduleRule } from '../types'
+import { formatBrazilDateTime } from '../lib/brazilTime'
 import './Dashboard.css'
 
 export function Dashboard() {
@@ -86,7 +87,7 @@ export function Dashboard() {
                   <span className={`direction ${msg.direction.toLowerCase()}`}>
                     {msg.direction === 'Incoming' ? '📲 Recebido' : '📤 Enviado'}
                   </span>
-                  <span className="time">{new Date(msg.timestampUtc).toLocaleString('pt-BR')}</span>
+                  <span className="time">{formatBrazilDateTime(msg.timestampUtc)}</span>
                 </div>
                 <div className="message-body">
                   <strong>{msg.phoneNumber}</strong>: {msg.content.substring(0, 50)}...
