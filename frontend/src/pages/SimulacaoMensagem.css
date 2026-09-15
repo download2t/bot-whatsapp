@@ -1,3 +1,37 @@
+.sim-checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.sim-checkbox-row input[type="checkbox"] {
+  margin-top: 3px;
+}
+
+.sim-checkbox-row label {
+  font-weight: 400;
+}
+
+.sim-checkbox-row code {
+  background: #f3f4f6;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.sim-timestamp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-top: 16px;
+}
+
+@media (max-width: 640px) {
+  .sim-timestamp-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .sim-layout {
   display: flex;
   gap: 16px;

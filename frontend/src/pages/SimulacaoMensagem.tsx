@@ -8,8 +8,30 @@ import './SimulacaoMensagem.css'
 // Mesma composição final usada de verdade em BulkMessages.tsx/BulkMessagesController
 // ("[Saudação] [Nome]!\n[Mensagem]") — aqui só é montada localmente, pra cada contato,
 // sem nenhuma chamada de envio. Nenhum request de mensagem/campanha é feito nesta tela.
-function buildPreview(greeting: string, contactName: string, message: string): string {
+function buildMessageBody(greeting: string, contactName: string, message: string): string {
   return `${greeting} ${contactName}!\n${message}`
+}
+
+// Reproduz o formato de export do WhatsApp Web ("[HH:mm, M/D/AAAA] Nome: mensagem" — mesma
+// lógica de frontend/src/lib/whatsappExport.ts, mas com mês/dia sem zero à esquerda porque foi
+// esse o formato pedido, não o "DD/MM/AAAA" já usado em Documentacao.tsx/Messages.tsx).
+function formatTimestampPrefix(date: Date, senderName: string): string {
+  const hh = String(date.getHours()).padStart(2, '0')
+  const mm = String(date.getMinutes()).padStart(2, '0')
+  const month = date.getMonth() + 1
+  const day = date.getDate()
+  const year = date.getFullYear()
+  return `[${hh}:${mm}, ${month}/${day}/${year}] ${senderName || '—'}: `
+}
+
+function todayIsoDate(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function nowHhMm(): string {
+  const d = new Date()
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 export function SimulacaoMensagem() {
@@ -26,6 +48,15 @@ export function SimulacaoMensagem() {
   const [activeContactId, setActiveContactId] = useState<number | null>(null)
   const [tabFilter, setTabFilter] = useState('')
   const [copiedId, setCopiedId] = useState<number | null>(null)
+
+  // Envelope opcional "[HH:mm, M/D/AAAA] Nome: " na frente de cada mensagem simulada, com o
+  // horário avançando por contato (contato 1 = horário inicial, contato 2 = + progressão, ...).
+  const [useTimestamp, setUseTimestamp] = useState(false)
+  const [senderName, setSenderName] = useState('')
+  const [startDate, setStartDate] = useState(todayIsoDate)
+  const [startTime, setStartTime] = useState(nowHhMm)
+  const [progressionValue, setProgressionValue] = useState(1)
+  const [progressionUnit, setProgressionUnit] = useState<'minutes' | 'seconds'>('minutes')
 
   const insertEmoji = (emoji: string) => {
     const textarea = messageRef.current
@@ -122,11 +153,30 @@ export function SimulacaoMensagem() {
     return simulated.filter(c => c.name.toLowerCase().includes(term))
   }, [simulated, tabFilter])
 
+  // Índice na ordem em que os contatos foram simulados (não na lista filtrada pela busca) —
+  // é essa ordem que define quantas "progressões" de tempo já passaram pra cada um.
+  const contactIndex = (contactId: number): number =>
+    simulated?.findIndex(c => c.id === contactId) ?? -1
+
+  const timestampForIndex = (index: number): Date => {
+    const [year, month, day] = startDate.split('-').map(Number)
+    const [hour, minute] = startTime.split(':').map(Number)
+    const base = new Date(year, (month || 1) - 1, day || 1, hour || 0, minute || 0, 0, 0)
+    const stepMs = (progressionUnit === 'minutes' ? progressionValue * 60 : progressionValue) * 1000
+    return new Date(base.getTime() + index * stepMs)
+  }
+
+  const buildPreview = (contact: Contato, index: number): string => {
+    const body = buildMessageBody(greeting, contact.name, message)
+    if (!useTimestamp) return body
+    return formatTimestampPrefix(timestampForIndex(index), senderName) + body
+  }
+
   const activeContact = simulated?.find(c => c.id === activeContactId) ?? null
-  const activeText = activeContact ? buildPreview(greeting, activeContact.name, message) : ''
+  const activeText = activeContact ? buildPreview(activeContact, contactIndex(activeContact.id)) : ''
 
   const handleCopy = async (contact: Contato) => {
-    const text = buildPreview(greeting, contact.name, message)
+    const text = buildPreview(contact, contactIndex(contact.id))
     try {
       await navigator.clipboard.writeText(text)
     } catch {
@@ -269,6 +319,86 @@ export function SimulacaoMensagem() {
                 </div>
               </Card>
 
+              <Card style={{ marginBottom: '24px' }}>
+                <CardHeader>
+                  <CardTitle>4️⃣ Data e hora (opcional)</CardTitle>
+                </CardHeader>
+
+                <div className="sim-checkbox-row">
+                  <input
+                    type="checkbox"
+                    id="useTimestamp"
+                    checked={useTimestamp}
+                    onChange={e => { setUseTimestamp(e.target.checked); setSimulated(null) }}
+                  />
+                  <label htmlFor="useTimestamp">
+                    Mostrar como conversa exportada — adiciona <code>[HH:mm, M/D/AAAA] Nome:</code> na
+                    frente de cada mensagem, avançando o horário a cada contato
+                  </label>
+                </div>
+
+                {useTimestamp && (
+                  <div className="sim-timestamp-grid">
+                    <div>
+                      <label htmlFor="senderName">🧑 Nome de quem envia</label>
+                      <input
+                        id="senderName"
+                        type="text"
+                        value={senderName}
+                        onChange={e => setSenderName(e.target.value)}
+                        placeholder="Ex: Patricia Barros"
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="startDate">📅 Data inicial</label>
+                      <input
+                        id="startDate"
+                        type="date"
+                        value={startDate}
+                        onChange={e => setStartDate(e.target.value)}
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="startTime">🕒 Hora inicial</label>
+                      <input
+                        id="startTime"
+                        type="time"
+                        value={startTime}
+                        onChange={e => setStartTime(e.target.value)}
+                      />
+                    </div>
+
+                    <div>
+                      <label htmlFor="progressionValue">⏩ Progressão entre mensagens</label>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <input
+                          id="progressionValue"
+                          type="number"
+                          min={0}
+                          step="0.5"
+                          value={progressionValue}
+                          onChange={e => setProgressionValue(Math.max(0, Number(e.target.value) || 0))}
+                          style={{ flex: 1 }}
+                        />
+                        <select
+                          value={progressionUnit}
+                          onChange={e => setProgressionUnit(e.target.value as 'minutes' | 'seconds')}
+                          style={{ flex: 1 }}
+                        >
+                          <option value="minutes">minutos</option>
+                          <option value="seconds">segundos</option>
+                        </select>
+                      </div>
+                      <small style={{ display: 'block', marginTop: '4px', color: '#666' }}>
+                        Ex: 1 minuto → 1º contato às {startTime}, 2º às +1min, 3º às +2min...
+                      </small>
+                    </div>
+                  </div>
+                )}
+              </Card>
+
               <div style={{ marginBottom: '24px' }}>
                 <button
                   className="btn btn-primary btn-lg"
@@ -307,7 +437,11 @@ export function SimulacaoMensagem() {
                     onClick={() => setActiveContactId(contact.id)}
                   >
                     <span className="sim-tab-name">{contact.name}</span>
-                    <span className="sim-tab-phone">{contact.phoneNumber}</span>
+                    <span className="sim-tab-phone">
+                      {useTimestamp
+                        ? timestampForIndex(contactIndex(contact.id)).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                        : contact.phoneNumber}
+                    </span>
                   </button>
                 ))}
                 {filteredTabs.length === 0 && (
