@@ -227,6 +227,17 @@ export function Navigation({
               📅 Calendário
             </button>
           </li>
+          <li className="nav-item">
+            <button
+              className="nav-trigger"
+              onClick={() => {
+                navigate("/simulacao");
+                closeMenus();
+              }}
+            >
+              🧪 Simulação
+            </button>
+          </li>
           {isAdmin && (
             <li className="nav-item">
               <button

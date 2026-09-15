@@ -17,6 +17,7 @@ import { PaisForm } from './pages/PaisForm'
 import { ChatFlowsList } from './pages/ChatFlowsList'
 import { ChatFlowForm } from './pages/ChatFlowForm'
 import { BulkMessages } from './pages/BulkMessages'
+import { SimulacaoMensagem } from './pages/SimulacaoMensagem'
 import { BulkCampaignDetail } from './pages/BulkCampaignDetail'
 import { BulkCampaignHistory } from './pages/BulkCampaignHistory'
 import { ProfilePage } from './pages/ProfilePage'
@@ -106,6 +107,7 @@ export default function App() {
         <Route path="/messages/bulk" element={<BulkMessages />} />
         <Route path="/messages/bulk/historico" element={<BulkCampaignHistory />} />
         <Route path="/messages/bulk/:id" element={<BulkCampaignDetail />} />
+        <Route path="/simulacao" element={<SimulacaoMensagem />} />
         <Route path="/turmas" element={<TurmasList />} />
         <Route path="/turmas/new" element={<TurmaForm />} />
         <Route path="/turmas/:id/edit" element={<TurmaForm />} />
