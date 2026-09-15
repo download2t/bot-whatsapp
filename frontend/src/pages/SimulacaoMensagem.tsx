@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
-import type { Contato, Turma } from '../types'
+import type { BulkCampaign, BulkCampaignListItem, Contato, Turma } from '../types'
 import { Card, CardHeader, CardTitle, EmptyState } from '../components/UI'
 import { EmojiPicker } from '../components/EmojiPicker'
 import './SimulacaoMensagem.css'
+
+type Mode = 'new' | 'history'
 
 // Mesma composição final usada de verdade em BulkMessages.tsx/BulkMessagesController
 // ("[Saudação] [Nome]!\n[Mensagem]") — aqui só é montada localmente, pra cada contato,
@@ -34,9 +37,28 @@ function nowHhMm(): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+function formatDateTime(value: string | null): string {
+  if (!value) return '—'
+  return new Date(value).toLocaleString('pt-BR')
+}
+
 export function SimulacaoMensagem() {
+  const [searchParams] = useSearchParams()
+  const fromCampaignParam = searchParams.get('fromCampaign')
+
+  const [mode, setMode] = useState<Mode>(fromCampaignParam ? 'history' : 'new')
+
+  // Modo "Nova simulação": turma -> contatos ativos dela.
   const [turmas, setTurmas] = useState<Turma[]>([])
   const [selectedTurma, setSelectedTurma] = useState<number | ''>('')
+
+  // Modo "A partir de histórico": escolhe uma campanha já enviada; os contatos e os horários
+  // reais de envio vêm dos itens dela (BulkCampaignItem.processedAtUtc), não são inventados.
+  const [campaigns, setCampaigns] = useState<BulkCampaignListItem[]>([])
+  const [selectedCampaignId, setSelectedCampaignId] = useState<number | ''>('')
+  const [campaignDetail, setCampaignDetail] = useState<BulkCampaign | null>(null)
+  const [historyTimestamps, setHistoryTimestamps] = useState<Record<number, string | null>>({})
+
   const [contacts, setContacts] = useState<Contato[]>([])
   const [selectedIds, setSelectedIds] = useState<Record<number, boolean>>({})
   const [greeting, setGreeting] = useState('Bom dia')
@@ -49,8 +71,8 @@ export function SimulacaoMensagem() {
   const [tabFilter, setTabFilter] = useState('')
   const [copiedId, setCopiedId] = useState<number | null>(null)
 
-  // Envelope opcional "[HH:mm, M/D/AAAA] Nome: " na frente de cada mensagem simulada, com o
-  // horário avançando por contato (contato 1 = horário inicial, contato 2 = + progressão, ...).
+  // Envelope opcional "[HH:mm, M/D/AAAA] Nome: " na frente de cada mensagem simulada. No modo
+  // novo o horário avança por progressão manual; no modo histórico usa o horário real de envio.
   const [useTimestamp, setUseTimestamp] = useState(false)
   const [senderName, setSenderName] = useState('')
   const [startDate, setStartDate] = useState(todayIsoDate)
@@ -77,6 +99,22 @@ export function SimulacaoMensagem() {
     })
   }
 
+  const resetAll = () => {
+    setSelectedTurma('')
+    setContacts([])
+    setSelectedIds({})
+    setSimulated(null)
+    setSelectedCampaignId('')
+    setCampaignDetail(null)
+    setHistoryTimestamps({})
+  }
+
+  const switchMode = (next: Mode) => {
+    if (next === mode) return
+    setMode(next)
+    resetAll()
+  }
+
   useEffect(() => {
     void (async () => {
       const t = await apiFetch<Turma[]>('/api/turmas')
@@ -85,10 +123,70 @@ export function SimulacaoMensagem() {
   }, [])
 
   useEffect(() => {
-    if (!selectedTurma) {
-      setContacts([])
-      setSelectedIds({})
+    if (mode !== 'history') return
+    void (async () => {
+      try {
+        const data = await apiFetch<BulkCampaignListItem[]>('/api/messages/bulk')
+        setCampaigns(data || [])
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Falha ao carregar histórico de envios')
+      }
+    })()
+  }, [mode])
+
+  const loadCampaign = async (id: number) => {
+    setLoading(true)
+    try {
+      const campaign = await apiFetch<BulkCampaign>(`/api/messages/bulk/${id}`)
+      setCampaignDetail(campaign)
+      setGreeting(campaign.greeting)
+      setMessage(campaign.messageTemplate)
+
+      const mapped: Contato[] = campaign.items.map(item => ({
+        id: item.contactId,
+        name: item.contactName,
+        phoneNumber: item.phoneNumber,
+        turmaId: null,
+        isActive: true,
+      }))
+      setContacts(mapped)
+
+      const selMap: Record<number, boolean> = {}
+      const tsMap: Record<number, string | null> = {}
+      campaign.items.forEach(item => {
+        selMap[item.contactId] = true
+        tsMap[item.contactId] = item.processedAtUtc
+      })
+      setSelectedIds(selMap)
+      setHistoryTimestamps(tsMap)
+      setUseTimestamp(true)
       setSimulated(null)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Falha ao carregar campanha')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Se veio de "🧪 Simular esta campanha" em BulkCampaignDetail.tsx, carrega direto.
+  useEffect(() => {
+    if (fromCampaignParam) {
+      const id = Number(fromCampaignParam)
+      if (id) {
+        setSelectedCampaignId(id)
+        void loadCampaign(id)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    if (mode !== 'new' || !selectedTurma) {
+      if (mode === 'new' && !selectedTurma) {
+        setContacts([])
+        setSelectedIds({})
+        setSimulated(null)
+      }
       return
     }
 
@@ -110,7 +208,9 @@ export function SimulacaoMensagem() {
     }
 
     void load()
-  }, [selectedTurma])
+  }, [selectedTurma, mode])
+
+  const contactsReady = mode === 'new' ? !!selectedTurma : !!campaignDetail
 
   const selectedContacts = useMemo(
     () => contacts.filter(contact => !!selectedIds[contact.id]),
@@ -154,7 +254,7 @@ export function SimulacaoMensagem() {
   }, [simulated, tabFilter])
 
   // Índice na ordem em que os contatos foram simulados (não na lista filtrada pela busca) —
-  // é essa ordem que define quantas "progressões" de tempo já passaram pra cada um.
+  // no modo novo é essa ordem que define quantas "progressões" de tempo já passaram.
   const contactIndex = (contactId: number): number =>
     simulated?.findIndex(c => c.id === contactId) ?? -1
 
@@ -166,10 +266,24 @@ export function SimulacaoMensagem() {
     return new Date(base.getTime() + index * stepMs)
   }
 
+  // No modo histórico usa o horário REAL de quando aquele item foi processado na campanha
+  // original; se nunca chegou a ser processado (ficou Pending/Cancelled), cai pra data de
+  // criação da campanha como aproximação.
+  const resolveTimestamp = (contact: Contato, index: number): Date | null => {
+    if (mode === 'history') {
+      const iso = historyTimestamps[contact.id]
+      if (iso) return new Date(iso)
+      return campaignDetail ? new Date(campaignDetail.createdAtUtc) : null
+    }
+    return timestampForIndex(index)
+  }
+
   const buildPreview = (contact: Contato, index: number): string => {
     const body = buildMessageBody(greeting, contact.name, message)
     if (!useTimestamp) return body
-    return formatTimestampPrefix(timestampForIndex(index), senderName) + body
+    const ts = resolveTimestamp(contact, index)
+    if (!ts) return body
+    return formatTimestampPrefix(ts, senderName) + body
   }
 
   const activeContact = simulated?.find(c => c.id === activeContactId) ?? null
@@ -196,32 +310,81 @@ export function SimulacaoMensagem() {
   return (
     <div className="container" style={{ padding: '24px' }}>
       <h1>🧪 Simulação de Mensagem</h1>
-      <p style={{ color: '#666', marginTop: '-8px', marginBottom: '24px' }}>
-        Monte a mensagem e veja exatamente como ela vai ficar pra cada contato da turma — nada é
+      <p style={{ color: '#666', marginTop: '-8px', marginBottom: '16px' }}>
+        Monte a mensagem e veja exatamente como ela vai ficar pra cada contato — nada é
         enviado de verdade aqui.
       </p>
 
-      <Card style={{ marginBottom: '24px' }}>
-        <CardHeader>
-          <CardTitle>1️⃣ Selecionar Turma</CardTitle>
-        </CardHeader>
-        <div>
-          <label htmlFor="turmaSelect">🎓 Escolha uma turma:</label>
-          <select
-            id="turmaSelect"
-            value={selectedTurma}
-            onChange={e => setSelectedTurma(e.target.value ? Number(e.target.value) : '')}
-            style={{ marginBottom: '16px' }}
-          >
-            <option value="">— Selecione uma turma —</option>
-            {turmas.filter(turma => turma.isActive).map(turma => (
-              <option key={turma.id} value={turma.id}>{turma.name}</option>
-            ))}
-          </select>
-        </div>
-      </Card>
+      <div className="sim-mode-switch">
+        <button
+          className={`sim-mode-btn ${mode === 'new' ? 'active' : ''}`}
+          onClick={() => switchMode('new')}
+        >
+          🆕 Nova simulação
+        </button>
+        <button
+          className={`sim-mode-btn ${mode === 'history' ? 'active' : ''}`}
+          onClick={() => switchMode('history')}
+        >
+          📜 A partir de um histórico de envios
+        </button>
+      </div>
 
-      {selectedTurma && (
+      {mode === 'new' ? (
+        <Card style={{ marginBottom: '24px' }}>
+          <CardHeader>
+            <CardTitle>1️⃣ Selecionar Turma</CardTitle>
+          </CardHeader>
+          <div>
+            <label htmlFor="turmaSelect">🎓 Escolha uma turma:</label>
+            <select
+              id="turmaSelect"
+              value={selectedTurma}
+              onChange={e => setSelectedTurma(e.target.value ? Number(e.target.value) : '')}
+              style={{ marginBottom: '16px' }}
+            >
+              <option value="">— Selecione uma turma —</option>
+              {turmas.filter(turma => turma.isActive).map(turma => (
+                <option key={turma.id} value={turma.id}>{turma.name}</option>
+              ))}
+            </select>
+          </div>
+        </Card>
+      ) : (
+        <Card style={{ marginBottom: '24px' }}>
+          <CardHeader>
+            <CardTitle>1️⃣ Selecionar campanha do histórico</CardTitle>
+          </CardHeader>
+          <div>
+            <label htmlFor="campaignSelect">🗂️ Escolha uma campanha já enviada:</label>
+            <select
+              id="campaignSelect"
+              value={selectedCampaignId}
+              onChange={e => {
+                const id = e.target.value ? Number(e.target.value) : ''
+                setSelectedCampaignId(id)
+                if (id) void loadCampaign(id)
+              }}
+              style={{ marginBottom: '8px' }}
+            >
+              <option value="">— Selecione uma campanha —</option>
+              {campaigns.map(c => (
+                <option key={c.id} value={c.id}>
+                  #{c.id} · {formatDateTime(c.createdAtUtc)} · {c.totalCount} contato(s) · {c.messageTemplate.slice(0, 40)}
+                </option>
+              ))}
+            </select>
+            {campaignDetail && (
+              <small style={{ display: 'block', color: '#666' }}>
+                Carregado: campanha #{campaignDetail.id}, criada em {formatDateTime(campaignDetail.createdAtUtc)},
+                {' '}{campaignDetail.items.length} destinatário(s). A mensagem abaixo já veio pré-preenchida — edite à vontade.
+              </small>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {contactsReady && (
         <>
           <Card style={{ marginBottom: '24px' }}>
             <CardHeader>
@@ -233,8 +396,8 @@ export function SimulacaoMensagem() {
             ) : contacts.length === 0 ? (
               <EmptyState
                 icon="👤"
-                title="Nenhum contato ativo nesta turma"
-                text="Verifique se existem contatos cadastrados e ativos"
+                title="Nenhum contato encontrado"
+                text={mode === 'new' ? 'Verifique se existem contatos cadastrados e ativos' : 'Essa campanha não tem destinatários'}
               />
             ) : (
               <>
@@ -333,69 +496,93 @@ export function SimulacaoMensagem() {
                   />
                   <label htmlFor="useTimestamp">
                     Mostrar como conversa exportada — adiciona <code>[HH:mm, M/D/AAAA] Nome:</code> na
-                    frente de cada mensagem, avançando o horário a cada contato
+                    frente de cada mensagem
+                    {mode === 'new'
+                      ? ', avançando o horário a cada contato'
+                      : ', usando a data/hora reais de quando cada mensagem foi enviada'}
                   </label>
                 </div>
 
                 {useTimestamp && (
-                  <div className="sim-timestamp-grid">
-                    <div>
-                      <label htmlFor="senderName">🧑 Nome de quem envia</label>
-                      <input
-                        id="senderName"
-                        type="text"
-                        value={senderName}
-                        onChange={e => setSenderName(e.target.value)}
-                        placeholder="Ex: Patricia Barros"
-                      />
-                    </div>
-
-                    <div>
-                      <label htmlFor="startDate">📅 Data inicial</label>
-                      <input
-                        id="startDate"
-                        type="date"
-                        value={startDate}
-                        onChange={e => setStartDate(e.target.value)}
-                      />
-                    </div>
-
-                    <div>
-                      <label htmlFor="startTime">🕒 Hora inicial</label>
-                      <input
-                        id="startTime"
-                        type="time"
-                        value={startTime}
-                        onChange={e => setStartTime(e.target.value)}
-                      />
-                    </div>
-
-                    <div>
-                      <label htmlFor="progressionValue">⏩ Progressão entre mensagens</label>
-                      <div style={{ display: 'flex', gap: '8px' }}>
+                  mode === 'history' ? (
+                    <div className="sim-timestamp-grid">
+                      <div>
+                        <label htmlFor="senderName">🧑 Nome de quem envia</label>
                         <input
-                          id="progressionValue"
-                          type="number"
-                          min={0}
-                          step="0.5"
-                          value={progressionValue}
-                          onChange={e => setProgressionValue(Math.max(0, Number(e.target.value) || 0))}
-                          style={{ flex: 1 }}
+                          id="senderName"
+                          type="text"
+                          value={senderName}
+                          onChange={e => setSenderName(e.target.value)}
+                          placeholder="Ex: Patricia Barros"
                         />
-                        <select
-                          value={progressionUnit}
-                          onChange={e => setProgressionUnit(e.target.value as 'minutes' | 'seconds')}
-                          style={{ flex: 1 }}
-                        >
-                          <option value="minutes">minutos</option>
-                          <option value="seconds">segundos</option>
-                        </select>
                       </div>
-                      <small style={{ display: 'block', marginTop: '4px', color: '#666' }}>
-                        Ex: 1 minuto → 1º contato às {startTime}, 2º às +1min, 3º às +2min...
-                      </small>
+                      <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                        <small style={{ color: '#666' }}>
+                          📌 Cada contato mantém o horário real em que recebeu essa mensagem na campanha
+                          #{campaignDetail?.id} — não dá pra editar aqui, só a mensagem em si.
+                        </small>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="sim-timestamp-grid">
+                      <div>
+                        <label htmlFor="senderName">🧑 Nome de quem envia</label>
+                        <input
+                          id="senderName"
+                          type="text"
+                          value={senderName}
+                          onChange={e => setSenderName(e.target.value)}
+                          placeholder="Ex: Patricia Barros"
+                        />
+                      </div>
+
+                      <div>
+                        <label htmlFor="startDate">📅 Data inicial</label>
+                        <input
+                          id="startDate"
+                          type="date"
+                          value={startDate}
+                          onChange={e => setStartDate(e.target.value)}
+                        />
+                      </div>
+
+                      <div>
+                        <label htmlFor="startTime">🕒 Hora inicial</label>
+                        <input
+                          id="startTime"
+                          type="time"
+                          value={startTime}
+                          onChange={e => setStartTime(e.target.value)}
+                        />
+                      </div>
+
+                      <div>
+                        <label htmlFor="progressionValue">⏩ Progressão entre mensagens</label>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <input
+                            id="progressionValue"
+                            type="number"
+                            min={0}
+                            step="0.5"
+                            value={progressionValue}
+                            onChange={e => setProgressionValue(Math.max(0, Number(e.target.value) || 0))}
+                            style={{ flex: 1 }}
+                          />
+                          <select
+                            value={progressionUnit}
+                            onChange={e => setProgressionUnit(e.target.value as 'minutes' | 'seconds')}
+                            style={{ flex: 1 }}
+                          >
+                            <option value="minutes">minutos</option>
+                            <option value="seconds">segundos</option>
+                          </select>
+                        </div>
+                        <small style={{ display: 'block', marginTop: '4px', color: '#666' }}>
+                          Ex: 1 minuto → 1º contato às {startTime}, 2º às +1min, 3º às +2min...
+                        </small>
+                      </div>
+                    </div>
+                  )
                 )}
               </Card>
 
@@ -439,7 +626,7 @@ export function SimulacaoMensagem() {
                     <span className="sim-tab-name">{contact.name}</span>
                     <span className="sim-tab-phone">
                       {useTimestamp
-                        ? timestampForIndex(contactIndex(contact.id)).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                        ? (resolveTimestamp(contact, contactIndex(contact.id))?.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) ?? contact.phoneNumber)
                         : contact.phoneNumber}
                     </span>
                   </button>

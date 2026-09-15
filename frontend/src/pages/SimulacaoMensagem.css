@@ -1,3 +1,30 @@
+.sim-mode-switch {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.sim-mode-btn {
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 500;
+  color: #6b7280;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.sim-mode-btn:hover {
+  color: #374151;
+}
+
+.sim-mode-btn.active {
+  color: #4f46e5;
+  border-bottom-color: #4f46e5;
+}
+
 .sim-checkbox-row {
   display: flex;
   align-items: flex-start;

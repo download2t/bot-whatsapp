@@ -215,6 +215,9 @@ export function BulkCampaignDetail() {
               🔁 Reenviar pendentes/falhas
             </button>
           )}
+          <button className="btn btn-secondary" onClick={() => navigate(`/simulacao?fromCampaign=${campaign.id}`)}>
+            🧪 Simular esta campanha
+          </button>
         </div>
       </Card>
 
