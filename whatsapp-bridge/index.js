@@ -321,9 +321,17 @@ function ensureSession(id) {
     session.qrDataUrl = null;
     session.clientAlive = false;
 
+    // Client.initialize() (whatsapp-web.js) always calls puppeteer.launch() and overwrites
+    // this.pupBrowser unconditionally - it never closes whatever browser was there before. Just
+    // calling initializeSessionIfNeeded(session) here would reinitialize this same (now-stale)
+    // client and silently orphan its current Chromium process tree (main + renderer/utility
+    // children) with no reference left anywhere to close it - exactly what was piling up zombie
+    // Chrome processes across restarts/network blips. Route through restartSessionById instead,
+    // which destroys the old client (closeClientSafely, with a force-kill fallback if it hangs)
+    // before building a fresh session/client - the same safe path /session/:id/restart uses.
     if (!session.manualDisconnect) {
       setTimeout(() => {
-        void initializeSessionIfNeeded(session);
+        void restartSessionById(sessionId);
       }, 1500);
     }
   });
