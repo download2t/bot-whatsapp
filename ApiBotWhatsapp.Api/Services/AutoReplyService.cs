@@ -235,7 +235,7 @@ public class AutoReplyService(
             // after a human already took over the conversation.
             if (rule.ThrottleMinutes > 0)
             {
-                var timeSinceLastMessage = await GetTimeSinceLastOutgoingMessageAsync(ownerUserId, normalizedPhone, brasiliaTime, cancellationToken);
+                var timeSinceLastMessage = await GetTimeSinceLastOutgoingMessageAsync(ownerUserId, normalizedPhone, messageTimestampUtc, cancellationToken);
 
                 if (timeSinceLastMessage.HasValue && timeSinceLastMessage.Value.TotalMinutes < rule.ThrottleMinutes)
                 {
@@ -247,7 +247,7 @@ public class AutoReplyService(
             // Check daily limit
             if (rule.MaxDailyMessagesPerUser.HasValue && rule.MaxDailyMessagesPerUser > 0)
             {
-                var todayMessageCount = await GetTodayAutomaticMessageCountAsync(ownerUserId, normalizedPhone, brasiliaTime, cancellationToken);
+                var todayMessageCount = await GetTodayAutomaticMessageCountAsync(ownerUserId, normalizedPhone, messageTimestampUtc, brasiliaTime, cancellationToken);
                 if (todayMessageCount >= rule.MaxDailyMessagesPerUser)
                 {
                     return new WhatsAppWebhookResponse(false,
@@ -369,6 +369,8 @@ public class AutoReplyService(
         return false;
     }
 
+    // MessageLog.TimestampUtc holds true UTC, so nowReference must be UTC too (comparing it with
+    // the local Brasília time made every gap look 3h longer and effectively disabled throttle).
     private async Task<TimeSpan?> GetTimeSinceLastOutgoingMessageAsync(int ownerUserId, string phoneNumber, DateTime nowReference, CancellationToken cancellationToken)
     {
         var lastMessage = await dbContext.MessageLogs
@@ -384,9 +386,12 @@ public class AutoReplyService(
         return nowReference - lastMessage.TimestampUtc;
     }
 
-    private async Task<int> GetTodayAutomaticMessageCountAsync(int ownerUserId, string phoneNumber, DateTime brasiliaTime, CancellationToken cancellationToken)
+    private async Task<int> GetTodayAutomaticMessageCountAsync(int ownerUserId, string phoneNumber, DateTime messageUtc, DateTime brasiliaTime, CancellationToken cancellationToken)
     {
-        var todayStart = brasiliaTime.Date;
+        // "Today" is the owner's local day, but TimestampUtc is stored in UTC: take local
+        // midnight and shift it back to UTC using the local-vs-UTC offset of this very message.
+        var offset = brasiliaTime - messageUtc;
+        var todayStart = DateTime.SpecifyKind(brasiliaTime.Date - offset, DateTimeKind.Utc);
         var todayEnd = todayStart.AddDays(1);
 
         return await dbContext.MessageLogs
