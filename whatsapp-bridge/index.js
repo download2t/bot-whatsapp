@@ -6,6 +6,7 @@ import qrcode from "qrcode";
 import whatsappWebJs from "whatsapp-web.js";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,6 +23,35 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SESSIONS_STATE_FILE = path.join(__dirname, ".sessions.json");
 const AUTH_ROOT = path.join(__dirname, ".wwebjs_auth");
+const AUTH_TIMEOUT_MS = Number(process.env.WA_AUTH_TIMEOUT_MS) > 0 ? Number(process.env.WA_AUTH_TIMEOUT_MS) : 120000;
+const WA_CACHE_DIR = path.join(__dirname, ".wwebjs_cache");
+const WA_WEB_ARCHIVE_URL = "https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/{version}.html";
+
+// WhatsApp ships a new WhatsApp Web build every few hours, and whatsapp-web.js occasionally can't
+// drive a new one (e.g. an internal module it needs is renamed). The result is a session that
+// loads but never reaches a usable state, so no QR code. WA_WEB_VERSION pins a build that is
+// known to work: served from the local cache if that build was saved there, otherwise downloaded
+// from the public wppconnect-team/wa-version archive. Unset = live version (default behavior).
+function webVersionOptions() {
+  const pinned = (process.env.WA_WEB_VERSION ?? "").trim();
+  if (!pinned) {
+    return { webVersionCache: { type: "local", path: WA_CACHE_DIR } };
+  }
+
+  // The value becomes a file name and a URL segment, so only accept real version strings.
+  if (!/^\d+(\.\d+)*(-[A-Za-z]+)?$/.test(pinned)) {
+    console.log(`[WA] WA_WEB_VERSION inválida ("${pinned}") — ignorando e usando a versão atual do WhatsApp Web.`);
+    return { webVersionCache: { type: "local", path: WA_CACHE_DIR } };
+  }
+
+  const cachedLocally = existsSync(path.join(WA_CACHE_DIR, `${pinned}.html`));
+  return {
+    webVersion: pinned,
+    webVersionCache: cachedLocally
+      ? { type: "local", path: WA_CACHE_DIR }
+      : { type: "remote", remotePath: WA_WEB_ARCHIVE_URL },
+  };
+}
 
 const app = express();
 app.use(cors());
@@ -127,6 +157,26 @@ function updateSessionCounterFromId(sessionId) {
   if (Number.isFinite(current)) {
     sessionCounter = Math.max(sessionCounter, current + 1);
   }
+}
+
+// A session that keeps getting disconnected (e.g. WhatsApp logs it out right after every launch)
+// would otherwise be relaunched forever, piling Chromium start-ups on top of each other. History is
+// keyed by session id because restartSessionById replaces the session object each time.
+const MAX_AUTO_RESTARTS = 3;
+const AUTO_RESTART_WINDOW_MS = 5 * 60 * 1000;
+const autoRestartHistory = new Map();
+
+function allowAutoRestart(sessionId) {
+  const now = Date.now();
+  const recent = (autoRestartHistory.get(sessionId) ?? []).filter((at) => now - at < AUTO_RESTART_WINDOW_MS);
+  if (recent.length >= MAX_AUTO_RESTARTS) {
+    autoRestartHistory.set(sessionId, recent);
+    return false;
+  }
+
+  recent.push(now);
+  autoRestartHistory.set(sessionId, recent);
+  return true;
 }
 
 function normalizePhone(raw) {
@@ -270,14 +320,14 @@ function ensureSession(id) {
       clientId: sessionId,
       dataPath: path.join(__dirname, ".wwebjs_auth"),
     }),
-    // Pins the WhatsApp Web app bundle to whatever version worked on the first successful
-    // connect, and reuses it from disk on every restart. Without this, every process restart
-    // (e.g. on deploy) can fetch a different live WA Web version, which sometimes makes
-    // WhatsApp treat an already-linked session as needing to be re-verified with a new QR.
-    webVersionCache: {
-      type: "local",
-      path: path.join(__dirname, ".wwebjs_cache"),
-    },
+    // Which WhatsApp Web build to load. Unset = whatever WhatsApp serves live right now. Set
+    // WA_WEB_VERSION to pin a known-good build (see webVersionOptions) - needed when WhatsApp ships
+    // a build that this library can't drive yet.
+    ...webVersionOptions(),
+    // How long inject() waits for WhatsApp Web to load and reach a usable state before giving up
+    // ("Waiting failed: 30000ms exceeded" was the library default). Loading WhatsApp Web in a
+    // headless Chrome on a throttled VPS can take well over 30s.
+    authTimeoutMs: AUTH_TIMEOUT_MS,
     puppeteer: {
       headless: true,
       args: [
@@ -313,6 +363,7 @@ function ensureSession(id) {
     session.qrDataUrl = await qrcode.toDataURL(qr);
     session.status = "qr-required";
     session.clientReady = false;
+    console.log(`[STATUS] Sessão ${sessionId}: QR Code gerado — aguardando leitura.`);
   });
 
   client.on("ready", async () => {
@@ -343,6 +394,7 @@ function ensureSession(id) {
   });
 
   client.on("disconnected", (reason) => {
+    console.log(`[STATUS] Sessão ${sessionId}: desconectada (motivo: ${reason}, manual=${session.manualDisconnect}).`);
     session.status = "disconnected";
     session.lastError = reason;
     session.clientReady = false;
@@ -358,6 +410,13 @@ function ensureSession(id) {
     // which destroys the old client (closeClientSafely, with a force-kill fallback if it hangs)
     // before building a fresh session/client - the same safe path /session/:id/restart uses.
     if (!session.manualDisconnect) {
+      if (!allowAutoRestart(sessionId)) {
+        session.status = "error";
+        session.lastError = `Desconectada repetidamente (último motivo: ${reason}). A reconexão automática foi pausada para não ficar em loop — reinicie a sessão pela tela Saúde do Sistema.`;
+        console.log(`[STATUS] Sessão ${sessionId}: ${MAX_AUTO_RESTARTS} reconexões automáticas em ${AUTO_RESTART_WINDOW_MS / 60000} min — pausando para evitar loop.`);
+        return;
+      }
+
       setTimeout(() => {
         void restartSessionById(sessionId);
       }, 1500);
@@ -641,11 +700,62 @@ async function initializeSessionIfNeeded(session) {
     }
     session.clientAlive = true;
   } catch (error) {
-    session.lastError =
-      error?.message ?? "Unable to initialize WhatsApp client";
+    const reason = error?.message || String(error ?? "") || "Unable to initialize WhatsApp client";
+    const page = await describePageState(session);
+
+    session.lastError = page
+      ? `${reason} | Página: WhatsApp Web ${page.waVersion ?? "não carregou"}, socket=${page.socketState ?? "indisponível"}, online=${page.online}, título="${page.title}"`
+      : reason;
     session.status = "error";
+    console.log(`[SESSION] ${session.id}: falha ao iniciar — ${reason}${page ? ` — estado da página: ${JSON.stringify(page)}` : " — página indisponível"}`);
+
+    // A failed initialize() can leave the Chromium it launched running. Close it now so every
+    // failed attempt doesn't pile up another idle Chrome (and doesn't keep locking the profile).
+    const previousManualDisconnect = session.manualDisconnect;
+    session.manualDisconnect = true;
+    try {
+      await closeClientSafely(session, "destroy");
+      await killSessionChromium(session.id);
+    } finally {
+      session.manualDisconnect = previousManualDisconnect;
+    }
   } finally {
     session.isInitializing = false;
+  }
+}
+
+// Snapshot of what the WhatsApp Web page looks like right now, to explain WHY an initialization
+// timed out (bundle never loaded, internal module missing, socket stuck connecting, no network...).
+async function describePageState(session) {
+  const page = session.client?.pupPage;
+  if (!page) {
+    return null;
+  }
+
+  try {
+    return await Promise.race([
+      page.evaluate(() => {
+        let socketState = null;
+        try {
+          socketState = window.require?.("WAWebSocketModel")?.Socket?.state ?? null;
+        } catch (error) {
+          socketState = `erro: ${error?.message ?? error}`;
+        }
+
+        return {
+          waVersion: window.Debug?.VERSION ?? null,
+          hasRequire: typeof window.require === "function",
+          socketState,
+          online: navigator.onLine,
+          title: document.title,
+          url: location.href,
+          text: (document.body?.innerText ?? "").replace(/\s+/g, " ").slice(0, 160),
+        };
+      }),
+      delay(5000).then(() => null),
+    ]);
+  } catch {
+    return null;
   }
 }
 

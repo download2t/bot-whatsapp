@@ -362,15 +362,19 @@ export function buildFindings(snapshot, sessions) {
   for (const session of sessions) {
     if (session.status === "error") {
       const locked = /browser is already running/i.test(session.lastError ?? "");
-      add(
-        "danger",
-        `error-${session.id}`,
-        `Sessão "${session.id}" com erro`,
-        locked
-          ? "O Chrome anterior ficou preso na pasta da sessão (\"browser is already running\"), por isso não sai QR Code. Reiniciar a sessão mata o Chrome preso e limpa o bloqueio."
-          : `Erro: ${session.lastError ?? "desconhecido"}. Reiniciar a sessão costuma resolver.`,
-        { type: "restart-session", sessionId: session.id },
-      );
+      const timedOut = /waiting failed|auth timeout/i.test(session.lastError ?? "");
+      let detail = `Erro: ${session.lastError ?? "desconhecido"}. Reiniciar a sessão costuma resolver.`;
+      if (locked) {
+        detail =
+          "O Chrome anterior ficou preso na pasta da sessão (\"browser is already running\"), por isso não sai QR Code. Reiniciar a sessão mata o Chrome preso e limpa o bloqueio.";
+      } else if (timedOut) {
+        detail = `O WhatsApp Web não terminou de carregar no tempo limite, então não sai QR Code. Causas comuns: servidor sem CPU (veja o steal acima) ou sem conexão com os servidores do WhatsApp. O trecho "Página:" abaixo mostra o que o navegador estava vendo. ${session.lastError}`;
+      }
+
+      add("danger", `error-${session.id}`, `Sessão "${session.id}" com erro`, detail, {
+        type: "restart-session",
+        sessionId: session.id,
+      });
     }
 
     if (LEGACY_ID(session.id)) {
