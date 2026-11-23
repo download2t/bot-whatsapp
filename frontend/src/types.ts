@@ -249,3 +249,55 @@ export type CalendarNotificationLog = {
   success: boolean
   statusDetail: string | null
 }
+
+export type HealthLevel = 'danger' | 'warning' | 'info' | 'ok'
+
+export type HealthAction =
+  | { type: 'cleanup-chrome' }
+  | { type: 'restart-session'; sessionId: string }
+  | { type: 'remove-session'; sessionId: string }
+
+export type HealthFinding = {
+  id: string
+  level: HealthLevel
+  title: string
+  detail: string
+  action: HealthAction | null
+}
+
+export type HealthTopProcess = {
+  pid: number
+  name: string
+  cpuPercent: number
+  memMb: number
+  uptimeSeconds: number
+  sessionId: string | null
+  detail: string
+}
+
+export type HealthSession = {
+  id: string
+  status: string
+  isConnected: boolean
+  hasQr: boolean
+  lastError: string | null
+  ownerUserId: number | null
+  chrome: { processCount: number; mainProcessCount: number; cpuPercent: number; memMb: number } | null
+}
+
+export type SystemHealth = {
+  generatedAtUtc: string
+  bridge: { pid: number; uptimeSeconds: number; memoryMb: number; serviceName: string; canRestart: boolean }
+  system: {
+    supported: boolean
+    cpuCount: number
+    loadAverage: number[]
+    hostUptimeSeconds: number
+    cpu: { stealPercent: number; busyPercent: number } | null
+    memory: { totalMb: number; availableMb: number; swapTotalMb: number; swapUsedMb: number }
+    topProcesses: HealthTopProcess[]
+  }
+  sessions: HealthSession[]
+  orphanChrome: { sessionId: string; processCount: number; cpuPercent: number; memMb: number }[]
+  findings: HealthFinding[]
+}

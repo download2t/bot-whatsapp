@@ -243,6 +243,19 @@ export function Navigation({
               <button
                 className="nav-trigger"
                 onClick={() => {
+                  navigate("/saude-do-sistema");
+                  closeMenus();
+                }}
+              >
+                🩺 Saúde do Sistema
+              </button>
+            </li>
+          )}
+          {isAdmin && (
+            <li className="nav-item">
+              <button
+                className="nav-trigger"
+                onClick={() => {
                   navigate("/users");
                   closeMenus();
                 }}

@@ -4,15 +4,24 @@ import cors from "cors";
 import axios from "axios";
 import qrcode from "qrcode";
 import whatsappWebJs from "whatsapp-web.js";
+import crypto from "node:crypto";
+import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  buildFindings,
+  collectSystemSnapshot,
+  killProfileProcesses,
+  sessionIdFromProfileDir,
+} from "./system.js";
 
 const { Client, LocalAuth, MessageMedia } = whatsappWebJs;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const SESSIONS_STATE_FILE = path.join(__dirname, ".sessions.json");
+const AUTH_ROOT = path.join(__dirname, ".wwebjs_auth");
 
 const app = express();
 app.use(cors());
@@ -225,7 +234,26 @@ function normalizeSessionId(id) {
 }
 
 function getAuthSessionDir(sessionId) {
-  return path.join(__dirname, ".wwebjs_auth", `session-${sessionId}`);
+  return path.join(AUTH_ROOT, `session-${sessionId}`);
+}
+
+// Chromium spawns many child processes (renderers, GPU, zygotes). Killing only the main one leaves
+// the children alive holding the profile folder, and the next launch then fails with "The browser
+// is already running for <dir>" - so no QR code ever shows up. This kills the whole family for a
+// session's profile and clears the stale Singleton* lock files.
+async function killSessionChromium(sessionId) {
+  try {
+    const result = await killProfileProcesses(getAuthSessionDir(sessionId), AUTH_ROOT);
+    if (result.killedPids.length > 0 || result.removedLocks.length > 0) {
+      console.log(
+        `[SESSION] ${sessionId}: limpeza do Chromium — ${result.killedPids.length} processo(s) finalizado(s), locks removidos: ${result.removedLocks.join(", ") || "nenhum"}.`,
+      );
+    }
+    return result;
+  } catch (error) {
+    console.log(`[SESSION] ${sessionId}: falha na limpeza do Chromium — ${error?.message ?? error}`);
+    return { killedPids: [], removedLocks: [] };
+  }
 }
 
 function ensureSession(id) {
@@ -541,6 +569,8 @@ async function closeClientSafely(session, methodName) {
     } catch (killError) {
       console.log(`[SESSION] ${session.id}: falha ao tentar matar o processo do Chromium — ${killError?.message ?? killError}`);
     }
+
+    await killSessionChromium(session.id);
   }
 }
 
@@ -553,6 +583,7 @@ async function restartSessionById(id) {
 
   previous.manualDisconnect = true;
   await closeClientSafely(previous, "destroy");
+  await killSessionChromium(sessionId);
 
   sessions.delete(sessionId);
   const recreated = ensureSession(sessionId);
@@ -570,6 +601,7 @@ async function logoutDefinitiveById(id) {
   session.manualDisconnect = true;
   await closeClientSafely(session, "logout");
   await closeClientSafely(session, "destroy");
+  await killSessionChromium(sessionId);
 
   sessions.delete(sessionId);
 
@@ -593,7 +625,20 @@ async function initializeSessionIfNeeded(session) {
   try {
     session.isInitializing = true;
     session.status = "connecting";
-    await session.client.initialize();
+    try {
+      await session.client.initialize();
+    } catch (error) {
+      if (!/browser is already running/i.test(error?.message ?? "")) {
+        throw error;
+      }
+
+      // A previous Chromium for this same profile survived (e.g. after a forced kill) and is
+      // locking it. Nothing else can legitimately own this profile while we're initializing it,
+      // so clear it and try once more instead of leaving the session stuck without a QR code.
+      console.log(`[SESSION] ${session.id}: Chromium anterior preso na pasta da sessão — limpando e tentando de novo.`);
+      await killSessionChromium(session.id);
+      await session.client.initialize();
+    }
     session.clientAlive = true;
   } catch (error) {
     session.lastError =
@@ -1067,6 +1112,176 @@ app.post("/messages/send", async (req, res) => {
     console.log(`[SEND] Falha ao enviar mensagem: ${error?.stack ?? error?.message ?? error}`);
     return res.status(500).json({ error: error?.message ?? "Send failed" });
   }
+});
+
+// ---------------------------------------------------------------------------------------------
+// Maintenance endpoints used by the "Saúde do Sistema" panel. They can kill processes and restart
+// the service, so unlike the rest of this bridge they require the shared secret (the same value as
+// BACKEND_WEBHOOK_TOKEN / WhatsApp:WebhookToken on the API). The API only forwards to them for
+// authenticated admins.
+// ---------------------------------------------------------------------------------------------
+const BRIDGE_SERVICE_NAME = process.env.BRIDGE_SERVICE_NAME ?? "mydev_bridge";
+
+function adminTokenMatches(provided) {
+  const a = Buffer.from(String(provided ?? ""));
+  const b = Buffer.from(backendWebhookToken);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function requireAdminToken(req, res, next) {
+  if (!adminTokenMatches(req.get("X-Webhook-Token"))) {
+    return res.status(401).json({ error: "Invalid admin token" });
+  }
+  next();
+}
+
+async function canRestartViaSystemd() {
+  if (process.platform !== "linux" || !/^[\w.@-]+$/.test(BRIDGE_SERVICE_NAME)) {
+    return false;
+  }
+
+  return fs
+    .access("/run/systemd/system")
+    .then(() => true)
+    .catch(() => false);
+}
+
+app.get("/admin/health", requireAdminToken, async (_req, res) => {
+  try {
+    const sessionList = Array.from(sessions.values()).map((item) => ({
+      id: item.id,
+      status: item.status,
+      isConnected: item.clientReady,
+      hasQr: Boolean(item.qrDataUrl),
+      lastError: item.lastError,
+      ownerUserId: extractOwnerUserId(item.id),
+    }));
+
+    const system = await collectSystemSnapshot(AUTH_ROOT);
+    const findings = buildFindings(system, sessionList);
+    const profileBySession = new Map(system.chromeProfiles.map((item) => [item.sessionId, item]));
+
+    // Deliberately no phone numbers here: operational status only, never another user's data.
+    return res.json({
+      generatedAtUtc: new Date().toISOString(),
+      bridge: {
+        pid: process.pid,
+        uptimeSeconds: Math.round(process.uptime()),
+        memoryMb: Math.round(process.memoryUsage().rss / (1024 * 1024)),
+        serviceName: BRIDGE_SERVICE_NAME,
+        canRestart: await canRestartViaSystemd(),
+      },
+      system: {
+        supported: system.supported,
+        cpuCount: system.cpuCount,
+        loadAverage: system.loadAverage,
+        hostUptimeSeconds: system.hostUptimeSeconds,
+        cpu: system.cpu,
+        memory: system.memory,
+        topProcesses: system.topProcesses,
+      },
+      sessions: sessionList.map((item) => {
+        const chrome = profileBySession.get(item.id);
+        return {
+          ...item,
+          chrome: chrome
+            ? {
+                processCount: chrome.processCount,
+                mainProcessCount: chrome.mainProcessCount,
+                cpuPercent: chrome.cpuPercent,
+                memMb: chrome.memMb,
+              }
+            : null,
+        };
+      }),
+      orphanChrome: system.chromeProfiles
+        .filter((item) => !sessions.has(item.sessionId))
+        .map((item) => ({
+          sessionId: item.sessionId,
+          processCount: item.processCount,
+          cpuPercent: item.cpuPercent,
+          memMb: item.memMb,
+        })),
+      findings,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error?.message ?? "Unable to collect health data" });
+  }
+});
+
+// Kills Chromium processes and removes stale lock files for every auth folder that does NOT belong
+// to a live session. Never touches a session that is registered in this bridge, and never deletes
+// any auth data.
+app.post("/admin/cleanup-chrome", requireAdminToken, async (_req, res) => {
+  try {
+    let folders = [];
+    try {
+      folders = await fs.readdir(AUTH_ROOT, { withFileTypes: true });
+    } catch {
+      folders = [];
+    }
+
+    const cleaned = [];
+    for (const entry of folders) {
+      if (!entry.isDirectory() || !entry.name.startsWith("session-")) continue;
+
+      const profileDir = path.join(AUTH_ROOT, entry.name);
+      const sessionId = sessionIdFromProfileDir(profileDir);
+      if (sessions.has(sessionId)) continue;
+
+      const result = await killProfileProcesses(profileDir, AUTH_ROOT);
+      if (result.killedPids.length > 0 || result.removedLocks.length > 0) {
+        cleaned.push({
+          sessionId,
+          killedProcesses: result.killedPids.length,
+          removedLocks: result.removedLocks,
+        });
+      }
+    }
+
+    // Orphans whose auth folder no longer exists at all (e.g. removed by logout-definitivo).
+    const system = await collectSystemSnapshot(AUTH_ROOT, 200);
+    for (const profile of system.chromeProfiles) {
+      if (sessions.has(profile.sessionId) || cleaned.some((item) => item.sessionId === profile.sessionId)) continue;
+
+      const result = await killProfileProcesses(profile.profileDir, AUTH_ROOT);
+      cleaned.push({
+        sessionId: profile.sessionId,
+        killedProcesses: result.killedPids.length,
+        removedLocks: result.removedLocks,
+      });
+    }
+
+    const killedProcesses = cleaned.reduce((sum, item) => sum + item.killedProcesses, 0);
+    console.log(`[ADMIN] cleanup-chrome: ${killedProcesses} processo(s) Chrome órfão(s) finalizado(s) em ${cleaned.length} pasta(s).`);
+    return res.json({ ok: true, killedProcesses, cleaned });
+  } catch (error) {
+    return res.status(500).json({ error: error?.message ?? "Cleanup failed" });
+  }
+});
+
+app.post("/admin/restart-bridge", requireAdminToken, async (_req, res) => {
+  if (!(await canRestartViaSystemd())) {
+    return res.status(501).json({
+      error: "Reinício automático indisponível aqui (só funciona no servidor Linux com systemd). Reinicie manualmente.",
+    });
+  }
+
+  console.log(`[ADMIN] restart-bridge solicitado — reiniciando o serviço ${BRIDGE_SERVICE_NAME}.`);
+  res.status(202).json({ ok: true, service: BRIDGE_SERVICE_NAME });
+
+  res.on("finish", () => {
+    setTimeout(() => {
+      const child = spawn("systemctl", ["restart", BRIDGE_SERVICE_NAME], {
+        detached: true,
+        stdio: "ignore",
+      });
+      child.on("error", (error) => {
+        console.log(`[ADMIN] falha ao executar systemctl restart: ${error?.message ?? error}`);
+      });
+      child.unref();
+    }, 300);
+  });
 });
 
 app.listen(port, () => {

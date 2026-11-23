@@ -194,6 +194,32 @@ public class WhatsAppBridgeClient(IConfiguration configuration, IHttpClientFacto
         }
     }
 
+    /// <summary>
+    /// Calls one of the bridge's maintenance endpoints (health snapshot, Chrome cleanup, service
+    /// restart, per-session restart/removal). These are protected on the bridge side by the shared
+    /// secret, which is sent here. Returns the bridge's raw JSON so the panel sees exactly what the
+    /// bridge reported; <c>Reachable</c> is false only when the bridge could not be contacted at all.
+    /// </summary>
+    public async Task<(bool Reachable, int StatusCode, string Body)> SendAdminRequestAsync(
+        HttpMethod method,
+        string relativePath,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(method, $"{BaseUrl}{relativePath}");
+            request.Headers.Add("X-Webhook-Token", configuration["WhatsApp:WebhookToken"] ?? string.Empty);
+
+            using var response = await _client.SendAsync(request, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            return (true, (int)response.StatusCode, body);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            return (false, 502, string.Empty);
+        }
+    }
+
     public async Task<(bool Success, string Status, string? MessageId, bool UnreadApplied)> SendMessageAsync(
         string phoneNumber,
         string message,

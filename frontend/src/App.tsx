@@ -25,6 +25,7 @@ import { ScheduleRulesList } from './pages/ScheduleRulesList'
 import { ScheduleRuleForm } from './pages/ScheduleRuleForm'
 import { ChangePasswordPage } from './pages/ChangePasswordPage'
 import { WhatsAppConnectionsPage } from './pages/WhatsAppConnectionsPage'
+import { SystemHealthPage } from './pages/SystemHealthPage'
 import { UsersList } from './pages/UsersList'
 import { UserForm } from './pages/UserForm'
 import { CalendarApp } from './pages/calendar/CalendarApp'
@@ -128,6 +129,7 @@ export default function App() {
         <Route path="/change-password" element={<ChangePasswordPage />} />
         <Route path="/whatsapp-connections" element={<WhatsAppConnectionsPage />} />
         <Route path="/calendario/*" element={<CalendarSection />} />
+        <Route path="/saude-do-sistema" element={isAdmin ? <SystemHealthPage /> : <Navigate to="/" replace />} />
         <Route path="/users" element={isAdmin ? <UsersList /> : <Navigate to="/" replace />} />
         <Route path="/users/new" element={isAdmin ? <UserForm /> : <Navigate to="/" replace />} />
         <Route path="/users/:id/edit" element={isAdmin ? <UserForm /> : <Navigate to="/" replace />} />

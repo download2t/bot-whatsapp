@@ -409,3 +409,16 @@
   .nav-menu.open .phone-number { color: var(--nav-text-hover); }
   .nav-menu.open .section-title { color: var(--nav-text); }
 }
+/* O menu tem itens demais para telas médias e estoura a largura (rolagem horizontal) entre o
+   breakpoint do hambúrguer (768px) e ~1360px. Compacta o desktop nessa faixa para que o item
+   "Saúde do Sistema" não piore isso. Não usar nowrap: os rótulos longos precisam poder quebrar. */
+@media (min-width: 769px) and (max-width: 1599px) {
+  .nav-menu {
+    gap: 0.125rem;
+  }
+
+  .nav-trigger {
+    padding: 0.5rem 0.5rem;
+    font-size: 0.8rem;
+  }
+}

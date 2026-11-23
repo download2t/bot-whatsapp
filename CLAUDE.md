@@ -69,6 +69,16 @@ Ordem de checagem:
 - Copiar uma conversa selecionada no `/messages` reproduz o formato de export do WhatsApp Web (`[HH:mm, DD/MM/YYYY] Nome: mensagem`, uma por linha) via um handler `onCopy` que sobrescreve o clipboard — não é a seleção de texto padrão do navegador.
 - `/documentacao` (`pages/Documentacao.tsx`) — escolhe uma pessoa, marca quais dias da conversa quer (checkbox por data, calculado a partir das mensagens já existentes) e gera o mesmo texto no formato WhatsApp acima, só das datas marcadas, com botão de copiar. Não grava nada no banco — é 100% derivado do `MessageLogs` já existente via `/api/messages/search`. A formatação (`formatExportLine`/`dateKey`/etc.) fica em `lib/whatsappExport.ts`, compartilhada com o `onCopy` de `/messages`.
 
+## Saúde do Sistema (admin-only)
+
+Tela `/saude-do-sistema` (`pages/SystemHealthPage.tsx`, atalho no menu superior só para admin) para diagnosticar e resolver lentidão da VPS sem SSH. É **operacional**: mostra CPU/steal/memória/swap, Chrome por sessão e processos mais pesados — nunca telefone, contatos ou mensagens, então não quebra o isolamento por usuário.
+
+- **API**: `SystemHealthController` (`/api/system-health`), toda rota exige `is_admin` e só encaminha ao bridge. Nada vem do cliente além do id de sessão, validado por regex. Ações são logadas (`LogWarning`) com o id do usuário.
+- **Bridge**: endpoints `/admin/health`, `/admin/cleanup-chrome` e `/admin/restart-bridge` em `whatsapp-bridge/index.js`, protegidos pelo mesmo segredo do webhook (header `X-Webhook-Token` = `BACKEND_WEBHOOK_TOKEN` = `WhatsApp__WebhookToken`, comparação em tempo constante). Reiniciar/remover sessão reaproveita `/session/:id/restart` e `/logout-definitivo`.
+- **`whatsapp-bridge/system.js`**: leitura do host via `/proc` (só Linux; em outros SO devolve `supported: false` sem quebrar) e `buildFindings`, que transforma números em alertas com a ação sugerida. Só inspeciona/mata Chrome cujo `--user-data-dir` está dentro de `.wwebjs_auth` — nunca outro Chrome do servidor.
+- `restart-bridge` executa `systemctl restart $BRIDGE_SERVICE_NAME` (padrão `mydev_bridge`), exige systemd e o bridge rodando com permissão para isso (em produção roda como root).
+- **Correção de causa raiz relacionada**: matar só o processo principal do Chromium deixava os filhos segurando a pasta do perfil e o próximo launch falhava com "browser is already running" (sem QR). Agora `closeClientSafely`, `restartSessionById`, `logoutDefinitiveById` e `initializeSessionIfNeeded` limpam a família inteira + os `Singleton*` (`killSessionChromium`). O runbook manual está em `guia_cpu_bridge.md`.
+
 ## Rodando localmente
 
 Ordem recomendada: API → Frontend → Bridge.

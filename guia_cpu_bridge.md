@@ -4,6 +4,16 @@ Runbook pra quando o sistema ficar lento de novo e a suspeita for o `whatsapp-br
 no incidente de 05–09/10/2026 (ver histórico de commits do `whatsapp-bridge/index.js` pro fix de
 código correspondente).
 
+## 0. Caminho mais fácil: painel "Saúde do Sistema"
+
+Logado como **admin**, abra **🩺 Saúde do Sistema** no menu superior (`/saude-do-sistema`). Ele faz
+sozinho o diagnóstico das seções 2 e 3 deste guia (carga, steal, memória/swap, Chrome por sessão,
+sessões mortas/travadas) e oferece um botão para cada reparo: limpar Chrome órfão, reiniciar uma
+sessão, remover uma sessão, reiniciar o bridge. Cada alerta explica o motivo e já traz o botão certo.
+
+Só use o terminal (seções abaixo) se o próprio bridge estiver fora do ar — nesse caso o painel
+mostra o aviso e o comando `systemctl restart mydev_bridge` para rodar no servidor.
+
 ## 1. Por que isso acontece
 
 Cada sessão do WhatsApp conectada é **uma instância inteira de Chrome rodando 24/7** (não tem
