@@ -79,7 +79,8 @@ export function BulkCampaignDetail() {
   }, [load])
 
   useEffect(() => {
-    if (!campaign || campaign.status !== 'Running') {
+    // A cancelled campaign can still have one send in flight; keep polling until it settles.
+    if (!campaign || (campaign.status !== 'Running' && !campaign.items.some(i => i.status === 'Sending'))) {
       return
     }
 
@@ -124,7 +125,9 @@ export function BulkCampaignDetail() {
   const progressPercent = campaign.totalCount > 0
     ? Math.min(100, Math.round(((processedCount + cancelledCount) / campaign.totalCount) * 100))
     : 0
-  const hasRetryCandidates = campaign.status !== 'Running' && campaign.items.some(i => i.status !== 'Sent')
+  const hasRetryCandidates = campaign.status !== 'Running'
+    && !campaign.items.some(i => i.status === 'Sending')
+    && campaign.items.some(i => i.status !== 'Sent')
 
   return (
     <div className="container" style={{ padding: '24px' }}>

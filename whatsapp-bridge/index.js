@@ -1102,6 +1102,14 @@ app.post("/messages/send", async (req, res) => {
       console.log(`[SEND] Sessão ${sessionId}: falha ao resolver contato de ${normalizedPhone} (${error?.message ?? error}), usando fallback ${target}.`);
     }
 
+    // When the page is sluggish/frozen the lookup above can sit there for minutes. If the API has
+    // already given up by then, it recorded this as failed — sending now would deliver a message
+    // nobody knows about (and duplicate it if the user resends).
+    if (res.destroyed) {
+      console.log(`[SEND] Sessão ${sessionId}: a API já desistiu desta requisição — mensagem para ${target} NÃO será enviada.`);
+      return;
+    }
+
     console.log(`[SEND] Sessão ${sessionId}: enviando para target=${target} (phoneNumber=${normalizedPhone}).`);
 
     let result;

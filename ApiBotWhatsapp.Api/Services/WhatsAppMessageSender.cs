@@ -6,6 +6,14 @@ namespace ApiBotWhatsapp.Api.Services;
 public class WhatsAppMessageSender(IConfiguration configuration, IHttpClientFactory httpClientFactory, WhatsAppBridgeClient bridgeClient)
 {
 
+    // True when we gave up waiting instead of being told "this did not go out": the bridge may
+    // still be working on it, so the message can yet be delivered. Resending (to the other 9th-digit
+    // variant, or to the next recipient of a campaign) is not safe or useful at that point.
+    public static bool IsDeliveryUncertain(string status) =>
+        status.Contains("bridge unavailable", StringComparison.OrdinalIgnoreCase)
+        || status.Contains("timed out", StringComparison.OrdinalIgnoreCase)
+        || status.Contains("não confirmada", StringComparison.OrdinalIgnoreCase);
+
     public async Task<(bool Success, string Status, string? MessageId, bool UnreadApplied)> SendMessageAsync(
         string phoneNumber,
         string message,
@@ -29,7 +37,7 @@ public class WhatsAppMessageSender(IConfiguration configuration, IHttpClientFact
             foreach (var candidate in candidates)
             {
                 var result = await bridgeClient.SendMessageAsync(candidate, message, markAsUnread, senderSessionId, cancellationToken, mediaBase64, mediaMimeType, mediaFileName, confirmDelivery);
-                if (result.Success)
+                if (result.Success || IsDeliveryUncertain(result.Status))
                 {
                     return result;
                 }

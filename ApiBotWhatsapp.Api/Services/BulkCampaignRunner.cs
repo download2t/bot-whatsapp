@@ -24,6 +24,12 @@ public class BulkCampaignRunner(IServiceScopeFactory scopeFactory)
             return false;
         }
 
+        // A hung bridge/browser would make every remaining recipient wait out the same timeout.
+        if (WhatsAppMessageSender.IsDeliveryUncertain(status))
+        {
+            return true;
+        }
+
         var normalized = status.ToLowerInvariant();
         return normalized.Contains("block")
             || normalized.Contains("bloque")
@@ -131,7 +137,9 @@ public class BulkCampaignRunner(IServiceScopeFactory scopeFactory)
                 }
 
                 item.Status = result.Success ? "Sent" : "Failed";
-                item.StatusDetail = result.Status;
+                item.StatusDetail = !result.Success && WhatsAppMessageSender.IsDeliveryUncertain(result.Status)
+                    ? $"O WhatsApp não respondeu a tempo. A mensagem pode ter sido entregue: confira antes de reenviar. ({result.Status})"
+                    : result.Status;
                 item.MessageId = result.MessageId;
                 item.ProcessedAtUtc = DateTime.UtcNow;
 
@@ -159,7 +167,7 @@ public class BulkCampaignRunner(IServiceScopeFactory scopeFactory)
                 if (!result.Success && ShouldAbortBulk(result.Status))
                 {
                     aborted = true;
-                    campaign.AbortReason = result.Status;
+                    campaign.AbortReason = item.StatusDetail;
                     break;
                 }
 
@@ -175,6 +183,14 @@ public class BulkCampaignRunner(IServiceScopeFactory scopeFactory)
                         break;
                     }
                 }
+            }
+
+            // The cancel button may have been pressed while the last send was still in flight; the
+            // user's cancellation wins over whatever that send ended up doing.
+            if (token.IsCancellationRequested)
+            {
+                cancelled = true;
+                aborted = false;
             }
 
             if (cancelled || aborted)

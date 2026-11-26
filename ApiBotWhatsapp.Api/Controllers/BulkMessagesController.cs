@@ -171,21 +171,21 @@ public class BulkMessagesController(
 
         var cancelledInMemory = campaignRunner.TryCancel(id);
 
-        if (!cancelledInMemory)
+        // Record the cancellation right away instead of waiting for the runner: it only notices
+        // between recipients, and a single in-flight send can take well over a minute. That
+        // in-flight item stays "Sending" (the runner writes its real result when it returns).
+        // Without an in-memory job (e.g. the API restarted) nothing will ever finish it, so it is
+        // cancelled here too.
+        foreach (var item in campaign.Items.Where(i => i.Status == "Pending" || (!cancelledInMemory && i.Status == "Sending")))
         {
-            // No in-memory job found (e.g. the API restarted since this campaign started) —
-            // finalize it here directly so the cancel button always works.
-            foreach (var item in campaign.Items.Where(i => i.Status == "Pending" || i.Status == "Sending"))
-            {
-                item.Status = "Cancelled";
-                item.StatusDetail = "Cancelado pelo usuário.";
-                item.ProcessedAtUtc = DateTime.UtcNow;
-            }
-
-            campaign.Status = "Cancelled";
-            campaign.FinishedAtUtc = DateTime.UtcNow;
-            await dbContext.SaveChangesAsync(cancellationToken);
+            item.Status = "Cancelled";
+            item.StatusDetail = "Cancelado pelo usuário.";
+            item.ProcessedAtUtc = DateTime.UtcNow;
         }
+
+        campaign.Status = "Cancelled";
+        campaign.FinishedAtUtc = DateTime.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return Ok(ToResponse(campaign));
     }
